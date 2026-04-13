@@ -407,6 +407,10 @@
         let isShopOpen = false;
         let customers = []; // 客NPCリスト
         let slimes = [];    // スライムリスト
+        let renji = null;   // レンジNPC
+        let renjiDialog = null; // レンジ会話パネル
+        let renjiTargetX = null; // レンジの移動目標X
+        let renjiTargetY = null; // レンジの移動目標Y
         let customerSpawnTimer = 0; // 客スポーンタイマー
         let prevTimeOfDay = 0; // 前フレームの時刻（朝判定用）
         let currentZoom = 1.0; // カメラズーム倍率
@@ -906,6 +910,8 @@
             // alien.png を差し替えることで見た目を自由に変更できます
             // フレーム0: 通常, フレーム1: 横伸び(ぷわっ), フレーム2: 縦伸び(ふわっ)
             this.load.spritesheet('alien', 'alien.png', { frameWidth: 24, frameHeight: 24 });
+            // レンジ スプライトシート (3フレーム横並び 96x32px)
+            this.load.spritesheet('renji', 'renji.png', { frameWidth: 32, frameHeight: 32 });
             
             // 背景画像 (パララックス効果用)を読み込み: 昼・夕方・夜の3種類
             this.load.image('bg_sky_day', 'bg_sky_day.png');
@@ -2130,6 +2136,216 @@
                     wBlock.body.enable = false; // 当たり判定なし（通り抜け可能）
                 }
 
+            // ============================================================
+            // === 地上の小さな家・廃墟を世界生成時に配置 ===
+            // ============================================================
+            {
+                const _scene = this;
+
+                // 指定X地点の地表の一番上のブロックY座標を返す
+                function hGetSurfY(wx) {
+                    const gx = Math.round(wx / blockSize) * blockSize;
+                    for (let sy = groundY - blockSize * 10; sy <= groundY + blockSize * 2; sy += blockSize) {
+                        if (bkGetAt(gx, sy)) return sy;
+                    }
+                    return groundY;
+                }
+
+                // 通常ブロックを1個配置するヘルパー（HALF_BLOCK特別処理含む）
+                function hPlaceBlock(bx, by, typeId) {
+                    if (bkGetAt(bx, by)) return null;
+                    const bd = BLOCK_DATA[typeId];
+                    if (!bd || bd.depth === -1) return null;
+                    const nb = platforms.create(bx, by, bd.texture, bd.frame);
+                    nb.refreshBody();
+                    nb.setData('typeId', typeId);
+                    nb.setData('hp', bd.hp);
+                    if (typeId === BLOCK_TYPES.HALF_BLOCK) {
+                        nb.body.enable = false;
+                        halfBlocks.push(nb);
+                        halfBlockPosSet.add(bkKey(nb.x, nb.y));
+                    }
+                    return nb;
+                }
+
+                // 光源（松明・ランタン）を配置するヘルパー
+                function hPlaceLight(bx, by, typeId) {
+                    const bd = BLOCK_DATA[typeId];
+                    if (!bd) return;
+                    const img = _scene.add.image(bx, by, bd.texture, bd.frame);
+                    img.setDepth(20);
+                    torches.push({ x: bx, y: by, img, type: typeId });
+                }
+
+                // ドア3段を配置するヘルパー
+                function hPlaceDoor(doorX, doorBottomY) {
+                    const dbData = BLOCK_DATA[BLOCK_TYPES.DOOR_B];
+                    const dmData = BLOCK_DATA[BLOCK_TYPES.DOOR_M];
+                    const dtData = BLOCK_DATA[BLOCK_TYPES.DOOR_T];
+                    if (!dbData || !dmData || !dtData) return;
+                    if (bkGetAt(doorX, doorBottomY) || bkGetAt(doorX, doorBottomY - blockSize) || bkGetAt(doorX, doorBottomY - blockSize * 2)) return;
+                    const dbBlock = platforms.create(doorX, doorBottomY,             dbData.texture, dbData.frame);
+                    const dmBlock = platforms.create(doorX, doorBottomY - blockSize, dmData.texture, dmData.frame);
+                    const dtBlock = platforms.create(doorX, doorBottomY - blockSize * 2, dtData.texture, dtData.frame);
+                    [dbBlock, dmBlock, dtBlock].forEach((b, i) => {
+                        b.refreshBody();
+                        b.setData('typeId', [BLOCK_TYPES.DOOR_B, BLOCK_TYPES.DOOR_M, BLOCK_TYPES.DOOR_T][i]);
+                        b.setData('hp', [dbData, dmData, dtData][i].hp);
+                        b.setData('doorOpen', false);
+                        b.setData('doorParts', [dbBlock, dmBlock, dtBlock]);
+                    });
+                }
+
+                // テーブルを配置するヘルパー（左→右自動）
+                function hPlaceTable(tlX, tlY) {
+                    if (bkGetAt(tlX, tlY) || bkGetAt(tlX + blockSize, tlY)) return;
+                    const tlData = BLOCK_DATA[BLOCK_TYPES.TABLE_L];
+                    const trData = BLOCK_DATA[BLOCK_TYPES.TABLE_R];
+                    if (!tlData || !trData) return;
+                    const tlBlock = platforms.create(tlX,              tlY, tlData.texture, tlData.frame);
+                    const trBlock = platforms.create(tlX + blockSize, tlY, trData.texture, trData.frame);
+                    tlBlock.refreshBody(); tlBlock.setData('typeId', BLOCK_TYPES.TABLE_L); tlBlock.setData('hp', tlData.hp); tlBlock.setData('tablePair', trBlock);
+                    trBlock.refreshBody(); trBlock.setData('typeId', BLOCK_TYPES.TABLE_R); trBlock.setData('hp', trData.hp); trBlock.setData('tablePair', tlBlock);
+                }
+
+                // 壁紙を1枚置くヘルパー（wallMap登録）
+                function hPlaceWall(bx, by, wallType, alpha) {
+                    if (wallMap.has(wallKey(bx, by))) return;
+                    const wData = WALL_DATA[wallType];
+                    if (!wData) return;
+                    const spr = _scene.add.image(bx, by, wData.texture);
+                    spr.setDepth(-2).setAlpha(alpha !== undefined ? alpha : 0.88);
+                    wallMap.set(wallKey(bx, by), { type: wallType, sprite: spr });
+                }
+
+                // ────────────────────────────────────────
+                // 小さな家を配置する本体
+                // centerX: 家の中心X, surfY: 地面ブロックのY座標, ruined: 廃墟かどうか
+                // ────────────────────────────────────────
+                function placeSmallHouse(centerX, surfY, ruined) {
+                    const W  = 7;  // 幅（ブロック数）
+                    const IH = 4;  // 壁の高さ（ドア3段 + 上段1）
+                    // ドアは左端(col 0)に配置し、外壁の代わりにする
+                    // col 0 rows 1-3 = DOOR_B/M/T、row 4 = LUMBER（ドア上の壁）
+                    // col W-1 = 右の外壁（全行 LUMBER）
+
+                    const x0 = Math.round(centerX / blockSize) * blockSize - 3 * blockSize;
+                    const floorY = surfY - blockSize;
+
+                    function skip(p) { return ruined && Math.random() < p; }
+                    function gx(col) { return x0 + col * blockSize; }
+                    function gy(row) { return floorY - row * blockSize; }
+
+                    // ── 床 (row 0) ──
+                    for (let i = 0; i < W; i++) {
+                        if (!skip(0.08)) hPlaceBlock(gx(i), gy(0), BLOCK_TYPES.STONE_BRICK);
+                    }
+
+                    // ── 左端：ドア枠(rows 1-3) + ドア上壁(row 4) ──
+                    // ドア枠（LUMBER 1本 = 幅1ブロック）は col -1 と col 1 に壁なし
+                    // ドアはcol 0に3段配置（外壁の代わり）
+                    const hasDoor = !ruined || Math.random() > 0.50;
+                    if (hasDoor) {
+                        // DOOR_B/M/T を直接置く（ゲームの自動設置ロジックは使わず手動）
+                        const dbData = BLOCK_DATA[BLOCK_TYPES.DOOR_B];
+                        const dmData = BLOCK_DATA[BLOCK_TYPES.DOOR_M];
+                        const dtData = BLOCK_DATA[BLOCK_TYPES.DOOR_T];
+                        if (dbData && dmData && dtData) {
+                            // 廃墟でも一部のドアパーツが欠損することがある
+                            const db = (!ruined || Math.random() > 0.3) ? platforms.create(gx(0), gy(1), dbData.texture, dbData.frame) : null;
+                            const dm = (!ruined || Math.random() > 0.3) ? platforms.create(gx(0), gy(2), dmData.texture, dmData.frame) : null;
+                            const dt = (!ruined || Math.random() > 0.3) ? platforms.create(gx(0), gy(3), dtData.texture, dtData.frame) : null;
+                            const doorParts = [db, dm, dt].filter(Boolean);
+                            [db, dm, dt].forEach((b, i) => {
+                                if (!b) return;
+                                b.refreshBody();
+                                b.setData('typeId', [BLOCK_TYPES.DOOR_B, BLOCK_TYPES.DOOR_M, BLOCK_TYPES.DOOR_T][i]);
+                                b.setData('hp', [dbData, dmData, dtData][i].hp);
+                                b.setData('doorOpen', false);
+                                b.setData('doorParts', doorParts);
+                            });
+                        }
+                    }
+                    // ドア上の壁（row IH = row 4）
+                    if (!skip(0.35)) hPlaceBlock(gx(0), gy(IH), BLOCK_TYPES.LUMBER);
+
+                    // ── 右外壁 (col W-1, rows 1 to IH) ──
+                    for (let r = 1; r <= IH; r++) {
+                        if (!skip(0.35)) hPlaceBlock(gx(W-1), gy(r), BLOCK_TYPES.LUMBER);
+                    }
+
+                    // ── 天井 (row IH+1) ──
+                    for (let i = 0; i < W; i++) {
+                        if (!skip(0.20)) hPlaceBlock(gx(i), gy(IH + 1), BLOCK_TYPES.LUMBER);
+                    }
+
+                    // ── 屋根 (row IH+2, オーバーハング付き) ──
+                    if (!ruined || Math.random() > 0.45) {
+                        for (let i = -1; i <= W; i++) {
+                            if (skip(0.22)) continue;
+                            hPlaceBlock(x0 + i * blockSize, gy(IH + 2), BLOCK_TYPES.HALF_BLOCK);
+                        }
+                    }
+
+                    // ── 内部の壁紙（WALL_WOOD）──
+                    // 内側 col 1〜W-2、row 1〜IH に壁紙を張る
+                    for (let r = 1; r <= IH; r++) {
+                        for (let c = 1; c <= W - 2; c++) {
+                            if (ruined) {
+                                // 廃墟：タイルごとにランダムにはがれる
+                                // はがれやすさは上ほど高い（重力でめくれるイメージ）
+                                const peelChance = 0.30 + (r / IH) * 0.25;
+                                if (Math.random() < peelChance) continue;
+                                // 残ったタイルも少し暗め・半透明にして古さを表現
+                                hPlaceWall(gx(c), gy(r), BLOCK_TYPES.WALL_WOOD, 0.55);
+                            } else {
+                                hPlaceWall(gx(c), gy(r), BLOCK_TYPES.WALL_WOOD, 0.88);
+                            }
+                        }
+                    }
+
+                    // ── 内装・家具 (廃墟は60%の確率でスキップ) ──
+                    if (!ruined || Math.random() > 0.55) {
+                        // テーブル (col 3-4, row 1) ←ドアが左端なので奥側に配置
+                        if (!skip(0.30)) hPlaceTable(gx(3), gy(1));
+                        // イス (col 2, row 1)
+                        if (!skip(0.35)) hPlaceBlock(gx(2), gy(1), BLOCK_TYPES.CHAIR);
+                        // 収納チェスト (col 5, row 1) ←右奥に配置
+                        if (!skip(0.45)) hPlaceBlock(gx(5), gy(1), BLOCK_TYPES.STORAGE_CHEST);
+                        // 松明 (右内壁 col W-2, row 3)
+                        if (!skip(0.35)) hPlaceLight(gx(W-2), gy(3), BLOCK_TYPES.TORCH);
+                    }
+                }
+
+                // ── 配置する場所を被らないよう選ぶ ──
+                const _housePosX = [];
+                function tryPickHouseX() {
+                    for (let att = 0; att < 60; att++) {
+                        const x = 350 + Math.random() * (worldWidth - 700);
+                        if (_housePosX.every(px => Math.abs(px - x) > 380)) {
+                            _housePosX.push(x);
+                            return x;
+                        }
+                    }
+                    return null;
+                }
+
+                // 通常の家を3～4棟
+                const _normalHouseCount = 3 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < _normalHouseCount; i++) {
+                    const hx = tryPickHouseX();
+                    if (hx !== null) placeSmallHouse(hx, hGetSurfY(hx), false);
+                }
+
+                // 廃墟を3～4棟
+                const _ruinCount = 3 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < _ruinCount; i++) {
+                    const hx = tryPickHouseX();
+                    if (hx !== null) placeSmallHouse(hx, hGetSurfY(hx), true);
+                }
+            }
+            // ============================================================
+
             // プレイヤーアニメーションの作成（各レイヤー用）
             const layerKeys = ['player_body', 'player_hair', 'player_outfit'];
             for (const lk of layerKeys) {
@@ -2294,6 +2510,20 @@
                 repeat: -1
             });
 
+            // レンジ アニメーション（renji.png スプライトシート使用）
+            // フレーム0=通常, 1=上伸び, 2=下縮み → ふわふわ浮遊ループ
+            this.anims.create({
+                key: 'renji_float',
+                frames: [
+                    { key: 'renji', frame: 0 },
+                    { key: 'renji', frame: 1 },
+                    { key: 'renji', frame: 0 },
+                    { key: 'renji', frame: 2 }
+                ],
+                frameRate: 3,
+                repeat: -1
+            });
+
             // 毛玉宇宙人アニメーション（alien.png スプライトシート使用）
             // フレーム0=正円, 1=横伸び, 2=縦伸び → ふわふわ浮遊ループ
             this.anims.create({
@@ -2363,6 +2593,9 @@
             for (let i = 0; i < birdCount; i++) {
                 spawnBird(this, worldWidth, groundY);
             }
+
+            // レンジをスポーン（初期リスポーン位置）
+            spawnRenji(this, worldWidth, groundY);
 
             // 商人をスポーン（セーブから復元されていない場合のみ）
             if (merchants.length === 0) {
@@ -3773,7 +4006,10 @@
         const CREATURE_BOOK = [
             // 人間
             { id: 'merchant', name: '商人', desc: '各地を旅する行商人。さまざまなアイテムを売っている。', texture: 'merchant', frame: 0, category: 'human' },
+            // 謎のイキモノ
+            { id: 'renji', name: 'レンジ', desc: 'ふわふわ飛べる電子レンジのような謎の生き物。知的に喋ることができ、冒険者をサポートしてくれる。', texture: 'renji', frame: 0, category: 'creature' },
             { id: 'customer', name: '毛玉宇宙人', desc: '宇宙からふわふわ降りてくる不思議な生き物。気に入ったアイテムをコインで買ってくれる。', texture: 'alien', frame: 0, category: 'creature' },
+            { id: 'slime', name: 'スライム', desc: 'ぷよぷよとした謎の生命体。地下深くに生息し、近づくと飛びかかってくる。', texture: 'slime', frame: 0, category: 'creature' },
             // 動物
             { id: 'rabbit', name: 'うさぎ', desc: '草原や地下に住む小動物。近づくと逃げてしまう。', texture: 'rabbit', frame: 0, category: 'animal' },
             { id: 'dog', name: '犬', desc: '骨を与えると仲間になる忠実な動物。', texture: 'dog', frame: 0, category: 'animal' },
@@ -3787,7 +4023,7 @@
         const CREATURE_BOOK_CATEGORIES = [
             { name: '人間', color: 0xcc6666, key: 'human' },
             { name: '動物', color: 0x66cc66, key: 'animal' },
-            { name: '宇宙人', color: 0xaa44ee, key: 'creature' },
+            { name: '謎のイキモノ', color: 0xaa44ee, key: 'creature' },
         ];
 
         function openCreatureBook(scene) {
@@ -4480,7 +4716,11 @@
             
             // 数字キー(1-5)での選択
             scene.input.keyboard.on('keydown', (event) => {
-                // ESCで図鑑を閉じる
+                // ESCで図鑑・ダイアログを閉じる
+                if (event.key === 'Escape' && renjiDialog) {
+                    closeRenjiDialog();
+                    return;
+                }
                 if (event.key === 'Escape' && isCreatureBookOpen) {
                     closeCreatureBook(scene);
                     return;
@@ -4978,6 +5218,11 @@
                 scene.tweens.add({ targets: ft, y: ft.y - 40, alpha: 0, duration: 1500, onComplete: () => ft.destroy() });
                 bedConfirmPanel.destroy();
                 bedConfirmPanel = null;
+                // レンジを自宅に移動させる
+                if (renji) {
+                    renjiTargetX = homePosition.x + 48;
+                    renjiTargetY = homePosition.y - 20;
+                }
             });
 
             noBtn.on('pointerdown', () => {
@@ -5775,6 +6020,102 @@
             container.setDepth(20);
             container.setVisible(false);
             return container;
+        }
+
+        // === レンジのヒント生成 ===
+        function getRenjiHint() {
+            // ゲーム進行状況に応じてヒントを返す
+            const hints = [];
+            if (!homePosition) {
+                hints.push('まずはベッドを作って、ここを自宅に設定してみよう！ベッドはクラフトメニューから作れるよ。');
+            }
+            // 作業台チェック
+            const hasWorkbench = platforms.getChildren().some(b => b.active && b.getData('typeId') === BLOCK_TYPES.WORKBENCH);
+            if (!hasWorkbench) {
+                hints.push('作業台を設置すると、いろんなアイテムを作れるようになるよ！木材と石材があれば作れるよ。');
+            }
+            // 所持金チェック
+            if (playerMoney < 10) {
+                hints.push('コインが少ないね。アイテムをテーブルに置いておくと、お客さんが買いに来てくれるよ！');
+            }
+            // HPチェック
+            if (playerHP < playerMaxHearts * HP_PER_HEART * 0.5) {
+                hints.push('体力が減ってるよ！ご飯を食べると回復するよ。小麦から作れるパンがオススメ！');
+            }
+            // 汎用ヒント
+            hints.push('地下には鉄鉱石や石炭が眠ってるよ。深く掘り進んでみよう！');
+            hints.push('商人に話しかけると、いろんなアイテムを買えるよ。');
+            hints.push('犬に骨をあげると仲間になってくれるよ！');
+            hints.push('夜になると危険が増すから、早めに帰宅しよう！');
+            hints.push('ブロックの素材を集めて、自分だけの家を建ててみよう！');
+            // 未解決のヒントを優先、なければランダム
+            const priority = hints.slice(0, Math.max(1, hints.length - 5));
+            if (priority.length > 0) return priority[Math.floor(Math.random() * priority.length)];
+            return hints[Math.floor(Math.random() * hints.length)];
+        }
+
+        function openRenjiDialog(scene) {
+            if (renjiDialog) return;
+            const hint = getRenjiHint();
+            const sw = scene.scale.width;
+            const sh = scene.scale.height;
+            const panelW = Math.min(320, sw - 30);
+            const panelH = 110;
+            const panelX = sw / 2 - panelW / 2;
+            const panelY = sh - panelH - 60;
+
+            renjiDialog = scene.add.container(0, 0).setScrollFactor(0).setDepth(502);
+
+            const bg = scene.add.rectangle(panelX + panelW / 2, panelY + panelH / 2, panelW, panelH, 0x0a1520, 0.93)
+                .setScrollFactor(0).setStrokeStyle(2, 0x44cccc);
+            renjiDialog.add(bg);
+
+            const nameTag = scene.add.text(panelX + 14, panelY + 10, '【レンジ】', {
+                fontSize: '13px', color: '#55eedd', fontStyle: 'bold'
+            }).setScrollFactor(0);
+            renjiDialog.add(nameTag);
+
+            const msgText = scene.add.text(panelX + 14, panelY + 30, hint, {
+                fontSize: '12px', color: '#ddeeff',
+                wordWrap: { width: panelW - 28 }
+            }).setScrollFactor(0);
+            renjiDialog.add(msgText);
+
+            const closeBtn = scene.add.text(panelX + panelW - 16, panelY + 10, '✕', {
+                fontSize: '16px', color: '#ff7777', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            closeBtn.on('pointerdown', () => closeRenjiDialog());
+            renjiDialog.add(closeBtn);
+
+            // 閉じる（画面タップでも）
+            bg.setInteractive();
+            bg.on('pointerdown', () => closeRenjiDialog());
+
+            if (uiCamera) assignCameraFilters(scene);
+        }
+
+        function closeRenjiDialog() {
+            if (!renjiDialog) return;
+            renjiDialog.destroy();
+            renjiDialog = null;
+        }
+
+        // === レンジNPCのスポーン ===
+        function spawnRenji(scene, worldWidth, groundY) {
+            if (renji) return;
+            const spawnX = worldWidth / 2;
+            const spawnY = groundY - 80;
+            renji = scene.physics.add.sprite(spawnX, spawnY, 'renji');
+            renji.setDisplaySize(32, 32);
+            renji.body.allowGravity = false;
+            renji.setImmovable(true);
+            renji.setDepth(12);
+            renji.play('renji_float');
+            renji._floatT = 0;
+            renji._baseX = spawnX;
+            renji._baseY = spawnY;
+            renji._talkBubble = createTalkBubble(scene, spawnX, spawnY - 30);
+            renji._talkBubble.setVisible(false);
         }
 
         function spawnMerchant(scene, x, y) {
@@ -7005,6 +7346,7 @@
             // 図鑑が開いている間はゲーム操作を停止
             if (isHelpOpen) return;
             if (isEncyclopediaOpen || isCreatureBookOpen) { closeWorkbenchPanel(); return; }
+            if (renjiDialog) return; // レンジダイアログ中はゲーム操作を停止
             if (isWorkbenchPanelOpen || isFurnacePanelOpen || isCookingPanelOpen) return; // パネル中はゲーム操作を停止
 
             // カメラ外ブロックの物理ボディを無効化（パフォーマンス最適化）
@@ -8017,6 +8359,37 @@
             // 客NPC更新
             updateCustomers(this, delta);
 
+            // === レンジNPC更新 ===
+            if (renji && renji.active) {
+                renji._floatT = (renji._floatT || 0) + delta * 0.001;
+                // 目標位置への移動
+                if (renjiTargetX !== null && renjiTargetY !== null) {
+                    const dx = renjiTargetX - renji._baseX;
+                    const dy = renjiTargetY - renji._baseY;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > 4) {
+                        const speed = Math.min(dist, 1.5);
+                        renji._baseX += (dx / dist) * speed;
+                        renji._baseY += (dy / dist) * speed;
+                    } else {
+                        renji._baseX = renjiTargetX;
+                        renji._baseY = renjiTargetY;
+                        renjiTargetX = null;
+                        renjiTargetY = null;
+                    }
+                }
+                // ふわふわ浮遊
+                renji.x = renji._baseX;
+                renji.y = renji._baseY + Math.sin(renji._floatT * 2.2) * 4;
+                // 吹き出し
+                if (renji._talkBubble) {
+                    const distToPlayer = Phaser.Math.Distance.Between(renji.x, renji.y, player.x, player.y);
+                    const bob = Math.sin(renji._floatT * 2.2) * 4;
+                    renji._talkBubble.setPosition(renji.x, renji.y - 36 + bob);
+                    renji._talkBubble.setVisible(distToPlayer < 90 && !renjiDialog);
+                }
+            }
+
             // プレイヤーとブロックのインタラクション（破壊・設置）
             // ズーム中は新規作成されたオブジェクトもカメラ振り分け
             if (currentZoom !== 1.0 && uiCamera) assignCameraFilters(this);
@@ -8110,6 +8483,24 @@
                         }
                         return;
                     }
+                }
+            }
+
+            // === レンジクリック判定 ===
+            if (validPointer.isDown && validPointer.getDuration() < 300 && renji && renji.active) {
+                const rDist = Phaser.Math.Distance.Between(validPointer._worldPtX, validPointer._worldPtY, renji.x, renji.y);
+                const playerRDist = Phaser.Math.Distance.Between(player.x, player.y, renji.x, renji.y);
+                if (rDist < 36 && playerRDist < 100) {
+                    if (scene.time.now - lastActionTime > 400) {
+                        lastActionTime = scene.time.now;
+                        if (renjiDialog) {
+                            closeRenjiDialog();
+                        } else {
+                            playSE('ui_click');
+                            openRenjiDialog(scene);
+                        }
+                    }
+                    return;
                 }
             }
 
@@ -9493,6 +9884,11 @@
                                         fontSize: '13px', color: '#66ff66', stroke: '#000', strokeThickness: 3
                                     }).setOrigin(0.5).setDepth(200);
                                     scene.tweens.add({ targets: homeText, y: homeText.y - 40, alpha: 0, duration: 1500, onComplete: () => homeText.destroy() });
+                                    // レンジを自宅に移動させる
+                                    if (renji) {
+                                        renjiTargetX = homePosition.x + 48;
+                                        renjiTargetY = homePosition.y - 20;
+                                    }
                                 }
                             }
                             // テーブル左半分を置いたら右半分も自動設置

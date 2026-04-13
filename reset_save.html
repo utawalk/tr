@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>セーブデータリセット</title>
+<style>
+  body {
+    background: #1a1a2e;
+    color: #eee;
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+  }
+  h1 { color: #aaccff; margin-bottom: 8px; }
+  p  { color: #aaa; margin-bottom: 24px; font-size: 14px; }
+  button {
+    padding: 14px 36px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    margin: 8px;
+  }
+  #resetBtn  { background: #cc3333; color: #fff; }
+  #resetBtn:hover { background: #ff4444; }
+  #backBtn   { background: #335533; color: #aaffaa; }
+  #backBtn:hover { background: #447744; }
+  #status { margin-top: 20px; font-size: 15px; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>⚠ セーブデータのリセット</h1>
+<p>ゲームの進行データをすべて削除します。<br>この操作は元に戻せません。</p>
+<button id="resetBtn" onclick="resetSave()">セーブデータを削除する</button>
+<button id="backBtn" onclick="goBack()">← ゲームに戻る</button>
+<div id="status"></div>
+<script>
+  const SAVE_KEY = 'tr_save_v2';
+  function resetSave() {
+    if (confirm('本当にセーブデータを削除しますか？\nこの操作は元に戻せません。')) {
+      localStorage.removeItem(SAVE_KEY);
+      document.getElementById('status').textContent = '✅ セーブデータを削除しました。ゲームを新しく始められます。';
+      document.getElementById('status').style.color = '#66ff66';
+    }
+  }
+  function goBack() {
+    window.location.href = 'index.html';
+  }
+</script>
+</body>
+</html>
