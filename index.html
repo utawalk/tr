@@ -1355,9 +1355,23 @@
                 if (bar) bar.style.width = '100%';
                 if (st)  st.textContent  = 'ワールドを準備中...';
             });
+            // ファイル読み込みエラー時もロードを止めないようにする
+            this.load.on('loaderror', (fileObj) => {
+                console.warn('[Loader] ファイル読み込みエラー（スキップ）:', fileObj.key, fileObj.src);
+            });
         }
 
         function create() {
+            // フォールバック: create()内でエラーが起きてもローディング画面を強制的に消す
+            setTimeout(() => {
+                const _ld = document.getElementById('loading-screen');
+                if (_ld && _ld.style.display !== 'none') {
+                    console.warn('[Fallback] ローディング画面を強制フェードアウトします');
+                    _ld.classList.add('fade-out');
+                    setTimeout(() => { _ld.style.display = 'none'; }, 700);
+                }
+            }, 15000); // 15秒後に強制解除
+
             // ワールドのサイズ（ゲームの世界の広さ）
             const worldWidth = 6000;
             const worldHeight = 3552; // 地下縦幅を3/4に縮小 (旧4480: 地下3712px → 2784px)
@@ -2139,6 +2153,7 @@
             // ============================================================
             // === 地上の小さな家・廃墟を世界生成時に配置 ===
             // ============================================================
+            try {
             {
                 const _scene = this;
 
@@ -2343,6 +2358,9 @@
                     const hx = tryPickHouseX();
                     if (hx !== null) placeSmallHouse(hx, hGetSurfY(hx), true);
                 }
+            }
+            } catch(e) {
+                console.warn('[HouseGen] 家生成エラーをスキップ:', e);
             }
             // ============================================================
 
@@ -2595,7 +2613,11 @@
             }
 
             // レンジをスポーン（初期リスポーン位置）
-            spawnRenji(this, worldWidth, groundY);
+            try {
+                spawnRenji(this, worldWidth, groundY);
+            } catch(e) {
+                console.warn('[spawnRenji] エラーをスキップ:', e);
+            }
 
             // 商人をスポーン（セーブから復元されていない場合のみ）
             if (merchants.length === 0) {
