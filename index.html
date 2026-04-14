@@ -7201,7 +7201,9 @@
             if (leftButton && rightButton && jumpButton) {
                 const margin = 20;
                 const buttonRadius = 40;
-                const yPos = height - margin - buttonRadius;
+                // スマホのブラウザバー（Safari下部タブ・Androidナビバー）分の余白を追加
+                const bottomSafeArea = isMobile ? 70 : 0;
+                const yPos = height - margin - buttonRadius - bottomSafeArea;
 
                 // 左下に配置
                 leftButton.setPosition(margin + buttonRadius, yPos);
