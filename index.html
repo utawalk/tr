@@ -154,12 +154,12 @@
             if (e.ctrlKey || e.metaKey) e.preventDefault();
         }, { passive: false });
 
-        // スマホ判定：CANVASレンダラーを使用してメモリ消費を抑える
+        // スマホ判定：ワールド幅削減などの軽量化に使用
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
                       || (navigator.maxTouchPoints > 1 && window.innerWidth < 1024);
 
         const config = {
-            type: isMobile ? Phaser.CANVAS : Phaser.AUTO,
+            type: Phaser.AUTO, // WebGL優先（CANVASだとテクスチャが正常描画されないため）
             width: window.innerWidth,
             height: window.innerHeight,
             physics: {
