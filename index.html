@@ -5269,23 +5269,23 @@
             moneyBg = scene.add.rectangle(10, 185, 120, 32, 0x000000, 0.6)
                 .setOrigin(0, 0.5).setScrollFactor(0).setDepth(100)
                 .setStrokeStyle(1, 0xaaaa44);
-            moneyIcon = scene.add.text(18, 185, '💰', {
+            moneyIcon = scene.add.text(18, 235, '💰', {
                 fontSize: '16px'
             }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(101);
-            moneyText = scene.add.text(40, 185, '0', {
+            moneyText = scene.add.text(40, 235, '0', {
                 fontSize: '16px', color: '#ffdd44', fontStyle: 'bold',
                 stroke: '#000', strokeThickness: 2
             }).setOrigin(0, 0.5).setScrollFactor(0).setDepth(101);
             updateMoneyUI();
 
             // 座標表示UI
-            coordText = scene.add.text(10, 205, 'X: 0  Y: 0', {
+            coordText = scene.add.text(10, 255, 'X: 0  Y: 0', {
                 fontSize: '14px', color: '#ffffff', fontStyle: 'bold',
                 stroke: '#000000', strokeThickness: 3
             }).setScrollFactor(0).setDepth(101);
 
             // ズーム率表示UI（座標の下）
-            const zoomY = 224;
+            const zoomY = 274;
             // 縮小ボタン「−」
             const zoomMinusBg = scene.add.rectangle(18, zoomY, 18, 18, 0x222244, 0.85)
                 .setScrollFactor(0).setDepth(101)
@@ -5331,7 +5331,7 @@
 
         // === ミニマップ ===
         const MINIMAP_W = 180, MINIMAP_H = 134;
-        const MINIMAP_X = 10, MINIMAP_Y = 30;
+        const MINIMAP_X = 10, MINIMAP_Y = 80;
 
         // ブロックタイプ→色マッピング
         const MINIMAP_COLORS = {
@@ -5476,7 +5476,7 @@
 
         // === 体力（ハート）UI ===
         const HEART_UI_X = 12;
-        const HEART_UI_Y = 225;
+        const HEART_UI_Y = 275;
         const HEART_SIZE = 22;
         const HEART_SPACING = 26;
 
@@ -7216,14 +7216,15 @@
                 jumpButton.setPosition(width - margin - buttonRadius, yPos);
                 jumpButton.text.setPosition(width - margin - buttonRadius, yPos);
 
-                // 右上に配置（モード切替）
-                modeButton.setPosition(width - margin - buttonRadius, margin + buttonRadius);
-                modeButton.text.setPosition(width - margin - buttonRadius, margin + buttonRadius);
+                // 右上に配置（モード切替）インベントリと重ならないよう50px下げた位置
+                const modeBtnY = margin + buttonRadius + 50;
+                modeButton.setPosition(width - margin - buttonRadius, modeBtnY);
+                modeButton.text.setPosition(width - margin - buttonRadius, modeBtnY);
 
                 // メニューボタン（モードボタンの下）
                 if (menuButton) {
                     const menuBtnX = width - margin - buttonRadius;
-                    const menuBtnY = margin + buttonRadius * 3 + 10;
+                    const menuBtnY = modeBtnY + buttonRadius * 2 + 10;
                     menuButton.setPosition(menuBtnX, menuBtnY);
                     menuButtonText.setPosition(menuBtnX, menuBtnY);
                     if (menuPanel) {
