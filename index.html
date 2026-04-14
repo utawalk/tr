@@ -1338,12 +1338,12 @@
             this.load.image('lumber',      'lumber.png');
             this.load.image('heart_full',  'heart_full.png');
             this.load.image('heart_empty', 'heart_empty.png');
-            this.load.image('door_closed_b', 'door_closed_b.png');
-            this.load.image('door_closed_m', 'door_closed_m.png');
-            this.load.image('door_closed_t', 'door_closed_t.png');
-            this.load.image('door_open_b',   'door_open_b.png');
-            this.load.image('door_open_m',   'door_open_m.png');
-            this.load.image('door_open_t',   'door_open_t.png');
+            this.load.image('door_closed_b', 'door_open_b.png');
+            this.load.image('door_closed_m', 'door_open_m.png');
+            this.load.image('door_closed_t', 'door_open_t.png');
+            this.load.image('door_open_b',   'door_closed_b.png');
+            this.load.image('door_open_m',   'door_closed_m.png');
+            this.load.image('door_open_t',   'door_closed_t.png');
             this.load.image('ladder',        'ladder.png');
 
             // ── ローディング進捗イベント ──
@@ -1890,6 +1890,9 @@
                         const trunk = platforms.create(tx, ty - h * blockSize, wd.texture, wd.frame);
                         trunk.setData('typeId', BLOCK_TYPES.WOOD);
                         trunk.setData('hp', wd.hp);
+                        trunk.setData('treeNative', true);
+                        trunk.body.enable = false;
+                        trunk.setDepth(-1);
                     }
                     // 葉: 小さめ（3x2）
                     const topTy = ty - tHeight * blockSize;
@@ -1905,6 +1908,9 @@
                         const leaf = platforms.create(lx, ly, ld.texture, ld.frame);
                         leaf.setData('typeId', BLOCK_TYPES.LEAF);
                         leaf.setData('hp', ld.hp);
+                        leaf.setData('treeNative', true);
+                        leaf.body.enable = false;
+                        leaf.setDepth(-1);
                     }
                 }
 
@@ -2079,12 +2085,15 @@
                     });
                     if (onWater) continue;
 
-                    // 幹を配置
+                    // 幹を配置（背景扱い：衝突なし・奥レイヤー）
                     for (let h = 1; h <= trunkHeight; h++) {
                         const bData = BLOCK_DATA[BLOCK_TYPES.WOOD];
                         const trunk = platforms.create(baseX, baseY - h * blockSize, bData.texture, bData.frame);
                         trunk.setData('typeId', BLOCK_TYPES.WOOD);
                         trunk.setData('hp', bData.hp);
+                        trunk.setData('treeNative', true); // 背景木フラグ（カリングで上書きされない）
+                        trunk.body.enable = false; // 衝突無効（背景として歩き抜けられる）
+                        trunk.setDepth(-1);        // 通常ブロックより奥・プレイヤーより手前
                     }
 
                     // 葉を配置（幹の上部に十字＋角形の樹冠）
@@ -2111,6 +2120,9 @@
                         const leaf = platforms.create(lx, ly, bData.texture, bData.frame);
                         leaf.setData('typeId', BLOCK_TYPES.LEAF);
                         leaf.setData('hp', bData.hp);
+                        leaf.setData('treeNative', true); // 背景木フラグ
+                        leaf.body.enable = false; // 衝突無効（背景として歩き抜けられる）
+                        leaf.setDepth(-1);        // 通常ブロックより奥・プレイヤーより手前
 
                         // 下段の葉に20%の確率でりんごを配置
                         // りんご先置き後に別の葉が同位置に来ないよう、apple位置も空きチェック
@@ -2121,6 +2133,9 @@
                                 const apple = platforms.create(lx, ay, aData.texture, aData.frame);
                                 apple.setData('typeId', BLOCK_TYPES.APPLE);
                                 apple.setData('hp', aData.hp);
+                                apple.setData('treeNative', true); // 背景木フラグ：衝突無効
+                                apple.body.enable = false;
+                                apple.setDepth(-1);
                             }
                         }
                     }
@@ -3174,6 +3189,9 @@
                         const trunk = platforms.create(baseX, baseY - h * blockSize, bData.texture, bData.frame);
                         trunk.setData('typeId', BLOCK_TYPES.WOOD);
                         trunk.setData('hp', bData.hp);
+                        trunk.setData('treeNative', true);
+                        trunk.body.enable = false;
+                        trunk.setDepth(-1);
                     }
 
                     const topY = baseY - trunkHeight * blockSize;
@@ -3192,6 +3210,9 @@
                         const leaf = platforms.create(lx, ly, bData.texture, bData.frame);
                         leaf.setData('typeId', BLOCK_TYPES.LEAF);
                         leaf.setData('hp', bData.hp);
+                        leaf.setData('treeNative', true);
+                        leaf.body.enable = false;
+                        leaf.setDepth(-1);
 
                         // りんごも付ける（apple位置も空きチェック）
                         if (dy >= 0 && dx !== 0 && Math.random() < 0.20) {
@@ -3201,6 +3222,9 @@
                                 const apple = platforms.create(lx, ay, aData.texture, aData.frame);
                                 apple.setData('typeId', BLOCK_TYPES.APPLE);
                                 apple.setData('hp', aData.hp);
+                                apple.setData('treeNative', true); // 背景木フラグ：衝突無効
+                                apple.body.enable = false;
+                                apple.setDepth(-1);
                             }
                         }
                     }
@@ -7278,6 +7302,16 @@
                 if (!b.active || !b.body) continue;
                 // 装飾・通り抜けブロックは常に physics を無効のまま保持
                 if (NO_PHYSICS_TYPES.has(b.getData('typeId'))) {
+                    b.body.enable = false;
+                    continue;
+                }
+                // 背景木（treeNative フラグ付き）は衝突なし・常に無効
+                if (b.getData('treeNative')) {
+                    b.body.enable = false;
+                    continue;
+                }
+                // 開いているドアは衝突なし・常に無効
+                if (b.getData('doorOpen')) {
                     b.body.enable = false;
                     continue;
                 }
