@@ -1,0 +1,133 @@
+{
+  "_comment": "生き物データ設定ファイル。数値・テキストを自由に編集できます。色は「0xRRGGBB」形式の16進数で指定してください。",
+
+  "slime": {
+    "_comment": "スライム（地下に出現するモンスター）",
+    "name": "スライム",
+    "desc": "ぷよぷよとした謎の生命体。地下深くに生息し、近づくと飛びかかってくる。",
+    "maxCount": 8,
+    "spawnInterval": 8000,
+    "hp": 3,
+    "detectRange": 200,
+    "speed": 80,
+    "damage": 1,
+    "damageCooldown": 1000,
+    "drops": [
+      { "_comment": "ドロップアイテム。typeは GOLD/IRON/APPLE/TORCH/STONE/RUBY/BONE のいずれか、nullはドロップなし",
+        "type": "GOLD",  "count": 1, "weight": 25 },
+      { "type": "IRON",  "count": 1, "weight": 15 },
+      { "type": "APPLE", "count": 1, "weight": 20 },
+      { "type": "TORCH", "count": 2, "weight": 15 },
+      { "type": "STONE", "count": 3, "weight": 15 },
+      { "type": null,    "count": 0, "weight": 10, "_comment": "ドロップなし" }
+    ]
+  },
+
+  "rabbit": {
+    "_comment": "うさぎ（地上・地下に生息するペット候補）",
+    "name": "うさぎ",
+    "desc": "草原や地下に住む小動物。近づくと逃げてしまう。",
+    "tameItem": "APPLE",
+    "tameThreshold": 3,
+    "fleeRange": 120,
+    "fleeSpeed": 120,
+    "walkSpeed": 50,
+    "shopkeeperSpeed": 60,
+    "approachSpeed": 40,
+    "approachRange": 200,
+    "petIdleRange": 60,
+    "petFollowSpeed": 100,
+    "petFollowSpeedFar": 200,
+    "petFollowThreshold": 200,
+    "petTeleportRange": 400,
+    "colors": ["0xffffff", "0xbbbbbb", "0xcc8855", "0x444444", "0xffd966"],
+    "colorNames": ["白", "グレー", "茶", "黒", "クリーム"]
+  },
+
+  "dog": {
+    "_comment": "犬（骨を与えるとペットになり、スライムと戦う）",
+    "name": "犬",
+    "desc": "骨を与えると仲間になる忠実な動物。",
+    "tameItem": "BONE",
+    "walkSpeed": 40,
+    "approachSpeed": 50,
+    "approachRange": 200,
+    "petIdleRange": 50,
+    "petFollowSpeed": 110,
+    "petFollowSpeedFar": 220,
+    "petFollowThreshold": 180,
+    "petTeleportRange": 400,
+    "attackSpeed": 250,
+    "attackRange": 100,
+    "attackDamage": 2,
+    "attackCooldown": 800,
+    "colors": ["0xffffff", "0xffee88", "0xaaaaaa", "0x333333", "0xffd0b0"],
+    "colorNames": ["茶", "ゴールデン", "グレー", "黒", "クリーム"]
+  },
+
+  "bird": {
+    "_comment": "鳥（地上の空を飛び回る）",
+    "spawnCountMin": 3,
+    "spawnCountMaxExtra": 3,
+    "minFlySpeed": 40,
+    "maxFlySpeed": 100,
+    "species": [
+      { "id": "bird0", "name": "すずめ",     "desc": "茶色い小鳥。空を飛び、時々木や地面で休む。" },
+      { "id": "bird1", "name": "ルリビタキ", "desc": "青い羽根が美しい小鳥。" },
+      { "id": "bird2", "name": "コマドリ",   "desc": "オレンジ色の胸が特徴的な小鳥。" },
+      { "id": "bird3", "name": "ウグイス",   "desc": "緑色の羽根を持つ小鳥。" },
+      { "id": "bird4", "name": "カナリア",   "desc": "鮮やかな黄色が目を引く小鳥。" }
+    ]
+  },
+
+  "chicken": {
+    "_comment": "ニワトリ（地上を歩き回り、定期的にたまごを産む）",
+    "name": "ニワトリ",
+    "desc": "地上をてくてく歩く鳥。しばらく待つと自動でたまごをくれる。",
+    "eggIntervalMin": 25000,
+    "eggIntervalMax": 60000,
+    "walkSpeed": 40
+  },
+
+  "merchant": {
+    "_comment": "商人NPC",
+    "name": "商人",
+    "desc": "各地を旅する行商人。さまざまなアイテムを売っている。"
+  },
+
+  "renji": {
+    "_comment": "レンジNPC",
+    "name": "レンジ",
+    "desc": "ふわふわ飛べる電子レンジのような謎の生き物。知的に喋ることができ、冒険者をサポートしてくれる。"
+  },
+
+  "customer": {
+    "_comment": "毛玉宇宙人NPC",
+    "name": "毛玉宇宙人",
+    "desc": "宇宙からふわふわ降りてくる不思議な生き物。気に入ったアイテムをコインで買ってくれる。",
+
+    "_colorComment": "10色バリエーション。weight が高いほど出現しやすい（レア度は rarity 参照）",
+    "colors": [
+      { "color": "0xffaabb", "name": "ピンク",        "weight": 30,  "rarity": "コモン"     },
+      { "color": "0x88ddff", "name": "ライトブルー",  "weight": 20,  "rarity": "コモン"     },
+      { "color": "0x99ffbb", "name": "ミント",        "weight": 18,  "rarity": "コモン"     },
+      { "color": "0xffee66", "name": "イエロー",      "weight": 12,  "rarity": "アンコモン" },
+      { "color": "0xff9944", "name": "オレンジ",      "weight": 8,   "rarity": "アンコモン" },
+      { "color": "0xff4466", "name": "レッド",        "weight": 5,   "rarity": "レア"       },
+      { "color": "0xaa44ff", "name": "パープル",      "weight": 4,   "rarity": "レア"       },
+      { "color": "0x44ffee", "name": "シアン",        "weight": 2,   "rarity": "スーパーレア"},
+      { "color": "0xffd700", "name": "ゴールド",      "weight": 0.8, "rarity": "ウルトラレア"},
+      { "color": "0xffffff", "name": "シルバー",      "weight": 0.2, "rarity": "レジェンド" }
+    ],
+
+    "_skyComment": "上空を飛ぶ背景宇宙人の設定",
+    "skyAlienMax": 10,
+    "skyAlienSpawnInterval": 4000,
+    "skyAlienMinSpeed": 25,
+    "skyAlienMaxSpeed": 65,
+    "skyAlienMinAlpha": 0.10,
+    "skyAlienMaxAlpha": 0.32,
+    "skyAlienMinScale": 0.35,
+    "skyAlienMaxScale": 0.75
+  }
+}

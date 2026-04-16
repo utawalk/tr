@@ -187,7 +187,145 @@
             }
         };
 
-        const game = new Phaser.Game(config);
+        // =============================================
+        // === 生き物データ（creatures.json から読み込む）===
+        // =============================================
+        let SLIME_MAX, SLIME_SPAWN_INTERVAL, SLIME_HP, SLIME_DETECT_RANGE, SLIME_SPEED, SLIME_DAMAGE, SLIME_DAMAGE_COOLDOWN;
+        let SLIME_DROPS;
+        let RABBIT_TAME_THRESHOLD, RABBIT_COLORS, RABBIT_COLOR_NAMES;
+        let RABBIT_FLEE_RANGE, RABBIT_FLEE_SPEED, RABBIT_WALK_SPEED, RABBIT_SHOPKEEPER_SPEED;
+        let RABBIT_APPROACH_SPEED, RABBIT_APPROACH_RANGE;
+        let RABBIT_PET_IDLE_RANGE, RABBIT_PET_FOLLOW_SPEED, RABBIT_PET_FOLLOW_SPEED_FAR, RABBIT_PET_FOLLOW_THRESHOLD, RABBIT_PET_TELEPORT_RANGE;
+        let DOG_COLORS, DOG_COLOR_NAMES;
+        let DOG_WALK_SPEED, DOG_APPROACH_SPEED, DOG_APPROACH_RANGE;
+        let DOG_PET_IDLE_RANGE, DOG_PET_FOLLOW_SPEED, DOG_PET_FOLLOW_SPEED_FAR, DOG_PET_FOLLOW_THRESHOLD, DOG_PET_TELEPORT_RANGE;
+        let DOG_ATTACK_SPEED, DOG_ATTACK_RANGE, DOG_ATTACK_DAMAGE, DOG_ATTACK_COOLDOWN;
+        let BIRD_SPAWN_MIN, BIRD_SPAWN_MAX_EXTRA, BIRD_MIN_FLY_SPEED, BIRD_FLY_SPEED_RANGE;
+        // --- 毛玉宇宙人 ---
+        let ALIEN_COLORS;
+        let SKY_ALIEN_MAX, SKY_ALIEN_SPAWN_INTERVAL;
+        let SKY_ALIEN_MIN_SPEED, SKY_ALIEN_MAX_SPEED;
+        let SKY_ALIEN_MIN_ALPHA, SKY_ALIEN_MAX_ALPHA;
+        let SKY_ALIEN_MIN_SCALE, SKY_ALIEN_MAX_SCALE;
+        let skyAliens = [];        // 上空を飛ぶ背景宇宙人リスト
+        let lastSkyAlienSpawn = 0; // 最後にスポーンした時刻
+        let _creatureData = null;
+
+        function applyCreatureData(d) {
+            // --- スライム ---
+            const slime = (d && d.slime) || {};
+            SLIME_MAX             = slime.maxCount       != null ? slime.maxCount       : 8;
+            SLIME_SPAWN_INTERVAL  = slime.spawnInterval  != null ? slime.spawnInterval  : 8000;
+            SLIME_HP              = slime.hp             != null ? slime.hp             : 3;
+            SLIME_DETECT_RANGE    = slime.detectRange    != null ? slime.detectRange    : 200;
+            SLIME_SPEED           = slime.speed          != null ? slime.speed          : 80;
+            SLIME_DAMAGE          = slime.damage         != null ? slime.damage         : 1;
+            SLIME_DAMAGE_COOLDOWN = slime.damageCooldown != null ? slime.damageCooldown : 1000;
+            // ドロップテーブル（BLOCK_TYPES / BLOCK_DATA が定義済みの前提で呼ばれる）
+            const rawDrops = slime.drops || [];
+            if (rawDrops.length > 0) {
+                SLIME_DROPS = rawDrops.map(function(drop) {
+                    if (!drop.type) return { type: null, count: 0, weight: drop.weight };
+                    const bt = BLOCK_TYPES[drop.type];
+                    const bd = BLOCK_DATA[bt] || {};
+                    return { type: bt, count: drop.count, weight: drop.weight, texture: bd.texture || 'tileset', frame: bd.frame != null ? bd.frame : 0 };
+                });
+            } else {
+                SLIME_DROPS = [
+                    { type: BLOCK_TYPES.GOLD,  count: 1, weight: 25, texture: 'tileset', frame: 8 },
+                    { type: BLOCK_TYPES.IRON,  count: 1, weight: 15, texture: 'tileset', frame: 12 },
+                    { type: BLOCK_TYPES.APPLE, count: 1, weight: 20, texture: 'tileset', frame: 13 },
+                    { type: BLOCK_TYPES.TORCH, count: 2, weight: 15, texture: 'tileset', frame: 5 },
+                    { type: BLOCK_TYPES.STONE, count: 3, weight: 15, texture: 'tileset', frame: 2 },
+                    { type: null,              count: 0, weight: 10 }
+                ];
+            }
+            // --- うさぎ ---
+            const rabbit = (d && d.rabbit) || {};
+            RABBIT_TAME_THRESHOLD       = rabbit.tameThreshold      != null ? rabbit.tameThreshold      : 3;
+            RABBIT_COLORS               = (rabbit.colors || ['0xffffff','0xbbbbbb','0xcc8855','0x444444','0xffd966']).map(function(c){ return parseInt(c); });
+            RABBIT_COLOR_NAMES          = rabbit.colorNames          || ['白','グレー','茶','黒','クリーム'];
+            RABBIT_FLEE_RANGE           = rabbit.fleeRange           != null ? rabbit.fleeRange           : 120;
+            RABBIT_FLEE_SPEED           = rabbit.fleeSpeed           != null ? rabbit.fleeSpeed           : 120;
+            RABBIT_WALK_SPEED           = rabbit.walkSpeed           != null ? rabbit.walkSpeed           : 50;
+            RABBIT_SHOPKEEPER_SPEED     = rabbit.shopkeeperSpeed     != null ? rabbit.shopkeeperSpeed     : 60;
+            RABBIT_APPROACH_SPEED       = rabbit.approachSpeed       != null ? rabbit.approachSpeed       : 40;
+            RABBIT_APPROACH_RANGE       = rabbit.approachRange       != null ? rabbit.approachRange       : 200;
+            RABBIT_PET_IDLE_RANGE       = rabbit.petIdleRange        != null ? rabbit.petIdleRange        : 60;
+            RABBIT_PET_FOLLOW_SPEED     = rabbit.petFollowSpeed      != null ? rabbit.petFollowSpeed      : 100;
+            RABBIT_PET_FOLLOW_SPEED_FAR = rabbit.petFollowSpeedFar   != null ? rabbit.petFollowSpeedFar   : 200;
+            RABBIT_PET_FOLLOW_THRESHOLD = rabbit.petFollowThreshold  != null ? rabbit.petFollowThreshold  : 200;
+            RABBIT_PET_TELEPORT_RANGE   = rabbit.petTeleportRange    != null ? rabbit.petTeleportRange    : 400;
+            // --- 犬 ---
+            const dog = (d && d.dog) || {};
+            DOG_COLORS                  = (dog.colors || ['0xffffff','0xffee88','0xaaaaaa','0x333333','0xffd0b0']).map(function(c){ return parseInt(c); });
+            DOG_COLOR_NAMES             = dog.colorNames             || ['茶','ゴールデン','グレー','黒','クリーム'];
+            DOG_WALK_SPEED              = dog.walkSpeed              != null ? dog.walkSpeed              : 40;
+            DOG_APPROACH_SPEED          = dog.approachSpeed          != null ? dog.approachSpeed          : 50;
+            DOG_APPROACH_RANGE          = dog.approachRange          != null ? dog.approachRange          : 200;
+            DOG_PET_IDLE_RANGE          = dog.petIdleRange           != null ? dog.petIdleRange           : 50;
+            DOG_PET_FOLLOW_SPEED        = dog.petFollowSpeed         != null ? dog.petFollowSpeed         : 110;
+            DOG_PET_FOLLOW_SPEED_FAR    = dog.petFollowSpeedFar      != null ? dog.petFollowSpeedFar      : 220;
+            DOG_PET_FOLLOW_THRESHOLD    = dog.petFollowThreshold     != null ? dog.petFollowThreshold     : 180;
+            DOG_PET_TELEPORT_RANGE      = dog.petTeleportRange       != null ? dog.petTeleportRange       : 400;
+            DOG_ATTACK_SPEED            = dog.attackSpeed            != null ? dog.attackSpeed            : 250;
+            DOG_ATTACK_RANGE            = dog.attackRange            != null ? dog.attackRange            : 100;
+            DOG_ATTACK_DAMAGE           = dog.attackDamage           != null ? dog.attackDamage           : 2;
+            DOG_ATTACK_COOLDOWN         = dog.attackCooldown         != null ? dog.attackCooldown         : 800;
+            // --- 鳥 ---
+            const bird = (d && d.bird) || {};
+            BIRD_SPAWN_MIN       = bird.spawnCountMin      != null ? bird.spawnCountMin      : 3;
+            BIRD_SPAWN_MAX_EXTRA = bird.spawnCountMaxExtra != null ? bird.spawnCountMaxExtra : 3;
+            BIRD_MIN_FLY_SPEED   = bird.minFlySpeed        != null ? bird.minFlySpeed        : 40;
+            BIRD_FLY_SPEED_RANGE = (bird.maxFlySpeed       != null ? bird.maxFlySpeed        : 100) - BIRD_MIN_FLY_SPEED;
+
+            // --- 毛玉宇宙人 ---
+            const customer = (d && d.customer) || {};
+            const defaultAlienColors = [
+                { color: 0xffaabb, name: 'ピンク',       weight: 30,  rarity: 'コモン'      },
+                { color: 0x88ddff, name: 'ライトブルー', weight: 20,  rarity: 'コモン'      },
+                { color: 0x99ffbb, name: 'ミント',       weight: 18,  rarity: 'コモン'      },
+                { color: 0xffee66, name: 'イエロー',     weight: 12,  rarity: 'アンコモン'  },
+                { color: 0xff9944, name: 'オレンジ',     weight: 8,   rarity: 'アンコモン'  },
+                { color: 0xff4466, name: 'レッド',       weight: 5,   rarity: 'レア'        },
+                { color: 0xaa44ff, name: 'パープル',     weight: 4,   rarity: 'レア'        },
+                { color: 0x44ffee, name: 'シアン',       weight: 2,   rarity: 'スーパーレア'},
+                { color: 0xffd700, name: 'ゴールド',     weight: 0.8, rarity: 'ウルトラレア'},
+                { color: 0xffffff, name: 'シルバー',     weight: 0.2, rarity: 'レジェンド'  }
+            ];
+            ALIEN_COLORS = customer.colors
+                ? customer.colors.map(function(c) { return { color: parseInt(c.color), name: c.name, weight: c.weight, rarity: c.rarity }; })
+                : defaultAlienColors;
+            SKY_ALIEN_MAX             = customer.skyAlienMax          != null ? customer.skyAlienMax          : 10;
+            SKY_ALIEN_SPAWN_INTERVAL  = customer.skyAlienSpawnInterval != null ? customer.skyAlienSpawnInterval : 4000;
+            SKY_ALIEN_MIN_SPEED       = customer.skyAlienMinSpeed      != null ? customer.skyAlienMinSpeed      : 25;
+            SKY_ALIEN_MAX_SPEED       = customer.skyAlienMaxSpeed      != null ? customer.skyAlienMaxSpeed      : 65;
+            SKY_ALIEN_MIN_ALPHA       = customer.skyAlienMinAlpha      != null ? customer.skyAlienMinAlpha      : 0.10;
+            SKY_ALIEN_MAX_ALPHA       = customer.skyAlienMaxAlpha      != null ? customer.skyAlienMaxAlpha      : 0.32;
+            SKY_ALIEN_MIN_SCALE       = customer.skyAlienMinScale      != null ? customer.skyAlienMinScale      : 0.35;
+            SKY_ALIEN_MAX_SCALE       = customer.skyAlienMaxScale      != null ? customer.skyAlienMaxScale      : 0.75;
+
+            _creatureData = d;
+
+            // 図鑑データを再構築（buildCreatureBook はファイル下部で定義されているが、
+            // applyCreatureData は async の resolve 後に呼ばれるため、既に利用可能）
+            if (typeof buildCreatureBook === 'function') {
+                CREATURE_BOOK = buildCreatureBook(d);
+            }
+        }
+
+        // creatures.json を読み込んでからゲームを起動
+        (async function initGame() {
+            try {
+                const res = await fetch('creatures.json');
+                const d   = await res.json();
+                applyCreatureData(d);
+            } catch(e) {
+                console.warn('creatures.json の読み込みに失敗しました。デフォルト値で起動します。', e);
+                applyCreatureData(null);
+            }
+            new Phaser.Game(config);
+        })();
 
         // =============================================
         // === 効果音システム (Web Audio API Oscillator) ===
@@ -383,28 +521,11 @@
         }
         // ────────────────────────────────────────────────────────────────
         let rabbits = []; // うさぎリスト
-        const RABBIT_TAME_THRESHOLD = 3; // 友好度がこの値でペット化
-
-        // うさぎの5色バリエーション（白ベーススプライトにtintを乗せる）
-        const RABBIT_COLORS = [
-            0xffffff, // ① 白（デフォルト）
-            0xbbbbbb, // ② グレー
-            0xcc8855, // ③ 茶色
-            0x444444, // ④ 黒
-            0xffd966, // ⑤ クリーム/イエロー
-        ];
-        const RABBIT_COLOR_NAMES = ['白', 'グレー', '茶', '黒', 'クリーム'];
-
-        // 犬の5色バリエーション（茶色ベーススプライトにtintを乗せる）
-        const DOG_COLORS = [
-            0xffffff, // ① ナチュラル（元の茶色）
-            0xffee88, // ② ゴールデン
-            0xaaaaaa, // ③ グレー
-            0x333333, // ④ ダーク/黒
-            0xffd0b0, // ⑤ クリーム
-        ];
-        const DOG_COLOR_NAMES = ['茶', 'ゴールデン', 'グレー', '黒', 'クリーム'];
+        // ※ RABBIT_TAME_THRESHOLD, RABBIT_COLORS, RABBIT_COLOR_NAMES は creatures.json から読み込まれる
+        // ※ DOG_COLORS, DOG_COLOR_NAMES も creatures.json から読み込まれる
         let dogs = []; // 犬リスト
+        let chickens = []; // ニワトリリスト
+        let _findSafeRabbitPos = null; // updateChickens から呼べるようにcreate内の関数をキャッシュ
         let birds = []; // 鳥リスト
         let merchants = []; // 商人NPCリスト
         let shopPanel = null; // 商人ショップUI
@@ -520,11 +641,14 @@
             BREAD: 54,         // パン
             TABLE_L: 55,       // テーブル（左半分）
             TABLE_R: 56,       // テーブル（右半分）
-            CHAIR: 57          // イス
+            CHAIR: 57,         // イス
+            EGG: 58,           // たまご（ニワトリが産む）
+            FRIED_EGG: 59,     // 目玉焼き（たまご→調理台）
+            EGG_SANDWICH: 60   // たまごサンド（小麦+たまご→調理台）
         };
 
         // ツールアイテム判定用セット（設置不可・消耗しない）
-        const TOOL_ITEMS = new Set([BLOCK_TYPES.STONE_PICKAXE, BLOCK_TYPES.APPLE, BLOCK_TYPES.IRON_INGOT, BLOCK_TYPES.IRON_PICKAXE, BLOCK_TYPES.WHEAT_SEED, BLOCK_TYPES.WHEAT, BLOCK_TYPES.BONE, BLOCK_TYPES.BREAD]);
+        const TOOL_ITEMS = new Set([BLOCK_TYPES.STONE_PICKAXE, BLOCK_TYPES.APPLE, BLOCK_TYPES.IRON_INGOT, BLOCK_TYPES.IRON_PICKAXE, BLOCK_TYPES.WHEAT_SEED, BLOCK_TYPES.WHEAT, BLOCK_TYPES.BONE, BLOCK_TYPES.BREAD, BLOCK_TYPES.EGG, BLOCK_TYPES.FRIED_EGG, BLOCK_TYPES.EGG_SANDWICH]);
 
         // ピッケル必須ブロック（素手では壊せない）
         const PICKAXE_REQUIRED = new Set([BLOCK_TYPES.IRON, BLOCK_TYPES.RUBY]);
@@ -540,6 +664,22 @@
             BLOCK_TYPES.COOKING_TABLE,
             BLOCK_TYPES.TABLE_L, BLOCK_TYPES.TABLE_R, BLOCK_TYPES.CHAIR
         ]);
+
+        // 家具系ブロック：当たり判定なし・プレイヤーの後ろレイヤー（depth=3）
+        // → プレイヤーは前を素通りでき、クリックインタラクションは引き続き可能
+        const FURNITURE_BG_TYPES = new Set([
+            BLOCK_TYPES.WORKBENCH, BLOCK_TYPES.FURNACE, BLOCK_TYPES.TABLE,
+            BLOCK_TYPES.STORAGE_CHEST, BLOCK_TYPES.SIGN_OPEN, BLOCK_TYPES.SIGN_CLOSE,
+            BLOCK_TYPES.STRAW_BED_L, BLOCK_TYPES.STRAW_BED_R,
+            BLOCK_TYPES.COOKING_TABLE,
+            BLOCK_TYPES.TABLE_L, BLOCK_TYPES.TABLE_R, BLOCK_TYPES.CHAIR
+        ]);
+
+        // 家具スタイルを適用するヘルパー（body無効化 + depth設定）
+        function applyFurnitureStyle(block) {
+            block.body.enable = false;
+            block.setDepth(3); // プレイヤー(10)より後ろ、地形(0)より前
+        }
 
         const BLOCK_DATA = {
             [BLOCK_TYPES.GRASS]: { id: BLOCK_TYPES.GRASS, texture: 'tileset', frame: 0, hp: 1 },
@@ -591,7 +731,10 @@
             [BLOCK_TYPES.BREAD]:         { id: BLOCK_TYPES.BREAD,         texture: 'bread',          frame: 0, hp: 1 },
             [BLOCK_TYPES.TABLE_L]:       { id: BLOCK_TYPES.TABLE_L,       texture: 'table_l',        iconTexture: 'table_icon', frame: 0, hp: 2 },
             [BLOCK_TYPES.TABLE_R]:       { id: BLOCK_TYPES.TABLE_R,       texture: 'table_r',        frame: 0, hp: 2 },
-            [BLOCK_TYPES.CHAIR]:         { id: BLOCK_TYPES.CHAIR,         texture: 'chair',          frame: 0, hp: 2 }
+            [BLOCK_TYPES.CHAIR]:         { id: BLOCK_TYPES.CHAIR,         texture: 'chair',          frame: 0, hp: 2 },
+            [BLOCK_TYPES.EGG]:           { id: BLOCK_TYPES.EGG,           texture: 'egg',            frame: 0, hp: 1 },
+            [BLOCK_TYPES.FRIED_EGG]:     { id: BLOCK_TYPES.FRIED_EGG,     texture: 'fried_egg',      frame: 0, hp: 1 },
+            [BLOCK_TYPES.EGG_SANDWICH]:  { id: BLOCK_TYPES.EGG_SANDWICH,  texture: 'egg_sandwich',   frame: 0, hp: 1 }
         };
 
         // ===== 壁紙システム =====
@@ -726,13 +869,15 @@
             // body.enable=false のブロック（階段・金鉱石など）は衝突処理をスキップ
             // Phaser の staticGroup は body.enable=false でも processCallback が呼ばれる場合があるため明示的に除外
             if (block.body && !block.body.enable) return false;
+            const tid = block.getData('typeId');
+            // 家具系ブロックは常に衝突なし（body.enable=false に加えて typeId でも明示的に除外）
+            if (FURNITURE_BG_TYPES.has(tid)) return false;
             // スロープ上のプレイヤーが階段近傍のブロックに衝突するのを防ぐ
             // これにより連続した階段ブロックを登る際、隣接する地形ブロックに押し戻されなくなる
             if (entity === player && wasOnSlope && isNearStair(block.x, block.y)) return false;
             // ハーフブロック上のプレイヤーがハーフブロック近傍のブロックに衝突するのを防ぐ
             // プレイヤー体幅 > ハーフブロック幅 のため毎フレーム衝突分離が発生しガタつきの原因になる
             if (entity === player && wasOnSlope && isNearHalfBlock(block.x, block.y)) return false;
-            const tid = block.getData('typeId');
             return tid !== BLOCK_TYPES.VINE && tid !== BLOCK_TYPES.WATER && tid !== BLOCK_TYPES.LADDER;
         }
 
@@ -871,8 +1016,14 @@
         const FUEL_ITEMS = new Set([BLOCK_TYPES.WOOD, BLOCK_TYPES.LEAF, BLOCK_TYPES.DIRT_WALL]);
 
         // 調理台レシピ
+        // inputId/inputCount = 食材1、input2Id/input2Count = 食材2（省略可）
         const COOKING_RECIPES = [
-            { inputId: BLOCK_TYPES.WHEAT, inputCount: 3, fuelId: BLOCK_TYPES.WOOD, resultId: BLOCK_TYPES.BREAD, resultCount: 1, name: 'パン', time: 4000 }
+            { inputId: BLOCK_TYPES.WHEAT, inputCount: 3, input2Id: null, input2Count: 0,
+              fuelId: BLOCK_TYPES.WOOD, resultId: BLOCK_TYPES.BREAD, resultCount: 1, name: 'パン', time: 4000 },
+            { inputId: BLOCK_TYPES.EGG,   inputCount: 1, input2Id: null, input2Count: 0,
+              fuelId: BLOCK_TYPES.WOOD, resultId: BLOCK_TYPES.FRIED_EGG, resultCount: 1, name: '目玉焼き', time: 3000 },
+            { inputId: BLOCK_TYPES.WHEAT, inputCount: 1, input2Id: BLOCK_TYPES.EGG, input2Count: 1,
+              fuelId: BLOCK_TYPES.WOOD, resultId: BLOCK_TYPES.EGG_SANDWICH, resultCount: 1, name: 'たまごサンド', time: 5000 }
         ];
 
         let lastActionTime = 0; // 採掘・設置のクールダウン管理用
@@ -1336,6 +1487,10 @@
             // ※ 各PNGファイルを差し替えることで見た目を変更できます
             this.load.image('slime',       'slime.png');
             this.load.image('lumber',      'lumber.png');
+            this.load.spritesheet('chicken', 'chicken.png', { frameWidth: 32, frameHeight: 32 });
+            this.load.image('egg',         'egg.png');
+            this.load.image('fried_egg',   'fried_egg.png');
+            this.load.image('egg_sandwich','egg_sandwich.png');
             this.load.image('heart_full',  'heart_full.png');
             this.load.image('heart_empty', 'heart_empty.png');
             this.load.image('door_closed_b', 'door_open_b.png');
@@ -1461,6 +1616,10 @@
                     if (b.typeId === BLOCK_TYPES.GOLD) {
                         newBlock.body.enable = false;
                     }
+                    // 家具系ブロックは衝突なし・後ろレイヤー
+                    if (FURNITURE_BG_TYPES.has(b.typeId)) {
+                        applyFurnitureStyle(newBlock);
+                    }
                     if (b.typeId === BLOCK_TYPES.STAIR) {
                         const flipped = b.stairFlipped || false;
                         newBlock.setFlipX(!flipped);
@@ -1468,6 +1627,13 @@
                         newBlock.setData('stairFlipped', flipped);
                         stairBlocks.push({ block: newBlock, flipped: flipped });
                         stairPosSet.add(bkKey(newBlock.x, newBlock.y));
+                    }
+                    if (b.typeId === BLOCK_TYPES.COOKING_TABLE) {
+                        if (b.cookingIngred1)   newBlock.setData('cookingIngred1',   b.cookingIngred1);
+                        if (b.cookingIngred2)   newBlock.setData('cookingIngred2',   b.cookingIngred2);
+                        if (b.cookingFuel)      newBlock.setData('cookingFuel',      b.cookingFuel);
+                        if (b.cookingResult)    newBlock.setData('cookingResult',    b.cookingResult);
+                        if (b.cookingRecipeIdx) newBlock.setData('cookingRecipeIdx', b.cookingRecipeIdx);
                     }
                     if (b.typeId === BLOCK_TYPES.SLOPE_R || b.typeId === BLOCK_TYPES.SLOPE_L) {
                         newBlock.body.enable = false;
@@ -1668,6 +1834,12 @@
                 if (_saveData.dogs) {
                     for (const sd of _saveData.dogs) {
                         spawnDog(this, sd.x, sd.y, sd.tamed, sd.colorIndex);
+                    }
+                }
+                // ニワトリを復元
+                if (_saveData.chickens) {
+                    for (const sc of _saveData.chickens) {
+                        spawnChicken(this, sc.x, sc.y);
                     }
                 }
             } else {
@@ -2075,7 +2247,9 @@
                     // 幹の高さ: 3～6ブロック
                     const trunkHeight = 3 + Math.floor(Math.random() * 4);
                     const baseX = x + blockSize / 2;
-                    const baseY = groundY - blockSize / 2; // 草ブロックのすぐ上
+                    // ループが h=1 始まりなので、h=1 のとき草ブロック(Y=groundY+blockSize/2)の
+                    // 真上(760)に来るよう baseY = groundY + blockSize/2 に設定する
+                    const baseY = groundY + blockSize / 2;
 
                     // 池の上には木を生成しない
                     let onWater = false;
@@ -2181,9 +2355,10 @@
                 function hGetSurfY(wx) {
                     const gx = Math.round(wx / blockSize) * blockSize;
                     for (let sy = groundY - blockSize * 10; sy <= groundY + blockSize * 2; sy += blockSize) {
-                        if (bkGetAt(gx, sy)) return sy;
+                        const blk = bkGetAt(gx, sy);
+                        if (blk) return blk.y; // 検索 Y ではなく実際のブロック中心 Y を返す
                     }
-                    return groundY;
+                    return groundY + blockSize / 2; // フォールバックも blockSize/2 ずらす
                 }
 
                 // 通常ブロックを1個配置するヘルパー（HALF_BLOCK特別処理含む）
@@ -2199,6 +2374,10 @@
                         nb.body.enable = false;
                         halfBlocks.push(nb);
                         halfBlockPosSet.add(bkKey(nb.x, nb.y));
+                    }
+                    // 家具系ブロックは衝突なし・後ろレイヤー
+                    if (FURNITURE_BG_TYPES.has(typeId)) {
+                        applyFurnitureStyle(nb);
                     }
                     return nb;
                 }
@@ -2241,6 +2420,8 @@
                     const trBlock = platforms.create(tlX + blockSize, tlY, trData.texture, trData.frame);
                     tlBlock.refreshBody(); tlBlock.setData('typeId', BLOCK_TYPES.TABLE_L); tlBlock.setData('hp', tlData.hp); tlBlock.setData('tablePair', trBlock);
                     trBlock.refreshBody(); trBlock.setData('typeId', BLOCK_TYPES.TABLE_R); trBlock.setData('hp', trData.hp); trBlock.setData('tablePair', tlBlock);
+                    applyFurnitureStyle(tlBlock);
+                    applyFurnitureStyle(trBlock);
                 }
 
                 // 壁紙を1枚置くヘルパー（wallMap登録）
@@ -2488,6 +2669,19 @@
                 repeat: -1
             });
 
+            // ニワトリアニメーション
+            this.anims.create({
+                key: 'chicken_idle',
+                frames: [{ key: 'chicken', frame: 0 }],
+                frameRate: 1
+            });
+            this.anims.create({
+                key: 'chicken_walk',
+                frames: this.anims.generateFrameNumbers('chicken', { start: 1, end: 2 }),
+                frameRate: 6,
+                repeat: -1
+            });
+
             // 犬アニメーション
             this.anims.create({
                 key: 'dog_idle',
@@ -2586,7 +2780,8 @@
                 for (let y = scanTop; y <= groundY + blockSize * 2; y += blockSize) {
                     const blk = bkGetAt(bx, y);
                     if (blk && blk.body && blk.body.enable) {
-                        return y - blockSize * 1.5; // 固体ブロックの少し上
+                        // ブロック中心（blk.y）から計算する（スキャンy座標はグリッドずれで不正確）
+                        return blk.y - blockSize * 1.5; // 固体ブロックの少し上
                     }
                 }
                 return groundY - blockSize; // フォールバック（地表 1 ブロック上）
@@ -2610,6 +2805,8 @@
                 // 全試行失敗時はフォールバック
                 return { x: worldWidth / 2, y: groundY - blockSize * 2 };
             }
+            // updateChickens（外部スコープ）から参照できるようにキャッシュ
+            _findSafeRabbitPos = findSafeRabbitPos;
             // ────────────────────────────────────────────────────────────
 
             // 地上にうさぎを低頻度でスポーン
@@ -2626,8 +2823,28 @@
                 spawnDog(this, dpos.x, dpos.y);
             }
 
+            // ニワトリをスポーン（2〜3羽）プレイヤー開始地点付近に集中させる
+            const chickenCount = 2 + Math.floor(Math.random() * 2);
+            const playerStartX = 3000;
+            for (let i = 0; i < chickenCount; i++) {
+                // プレイヤー開始地点 ±500px の範囲でランダムに配置
+                let cpos = null;
+                for (let t = 0; t < 15; t++) {
+                    const cx = playerStartX + (Math.random() * 1000 - 500);
+                    const clampedX = Math.max(200, Math.min(worldWidth - 200, Math.round(cx / blockSize) * blockSize));
+                    const cy = findSafeSurfaceY(clampedX);
+                    const occupied = bkGetAt(Math.round(clampedX / blockSize) * blockSize, Math.round((cy + 8) / blockSize) * blockSize);
+                    if (!occupied || !occupied.body || !occupied.body.enable) {
+                        cpos = { x: clampedX, y: cy };
+                        break;
+                    }
+                }
+                if (!cpos) cpos = findSafeRabbitPos(200); // フォールバック
+                spawnChicken(this, cpos.x, cpos.y);
+            }
+
             // 鳥をスポーン（3〜5羽）
-            const birdCount = 3 + Math.floor(Math.random() * 3);
+            const birdCount = BIRD_SPAWN_MIN + Math.floor(Math.random() * BIRD_SPAWN_MAX_EXTRA);
             for (let i = 0; i < birdCount; i++) {
                 spawnBird(this, worldWidth, groundY);
             }
@@ -3182,7 +3399,9 @@
                     const blockSize = 16;
                     const trunkHeight = 3 + Math.floor(Math.random() * 3);
                     const baseX = sapX;
-                    const baseY = sapY;
+                    // 苗木(sapY)は草ブロックの真上(Y=草center - blockSize)にある。
+                    // ループが h=1 始まりなので baseY = sapY + blockSize（= 草ブロックの中心Y）に設定する
+                    const baseY = sapY + blockSize;
 
                     for (let h = 1; h <= trunkHeight; h++) {
                         const bData = BLOCK_DATA[BLOCK_TYPES.WOOD];
@@ -3492,15 +3711,20 @@
                 ac.block.setData('cookingProgress', ac.progress);
                 if (ac.progress >= ac.recipe.time) {
                     // 調理完了
-                    const wheat = ac.block.getData('cookingWheat');
-                    const fuel  = ac.block.getData('cookingFuel');
-                    if (wheat) {
-                        wheat.count -= ac.recipe.inputCount;
-                        if (wheat.count <= 0) ac.block.setData('cookingWheat', null);
+                    const ingred1 = ac.block.getData('cookingIngred1');
+                    const ingred2 = ac.block.getData('cookingIngred2');
+                    const fuel    = ac.block.getData('cookingFuel');
+                    if (ingred1) {
+                        ingred1.count -= ac.recipe.inputCount;
+                        ac.block.setData('cookingIngred1', ingred1.count > 0 ? ingred1 : null);
+                    }
+                    if (ac.recipe.input2Id && ingred2) {
+                        ingred2.count -= ac.recipe.input2Count;
+                        ac.block.setData('cookingIngred2', ingred2.count > 0 ? ingred2 : null);
                     }
                     if (fuel) {
                         fuel.count -= 1;
-                        if (fuel.count <= 0) ac.block.setData('cookingFuel', null);
+                        ac.block.setData('cookingFuel', fuel.count > 0 ? fuel : null);
                     }
                     let result = ac.block.getData('cookingResult');
                     if (!result) result = { type: ac.recipe.resultId, count: 0 };
@@ -3508,9 +3732,14 @@
                     ac.block.setData('cookingResult', result);
                     playSE('furnace_done');
 
-                    const wheatLeft = ac.block.getData('cookingWheat');
-                    const fuelLeft  = ac.block.getData('cookingFuel');
-                    if (wheatLeft && wheatLeft.count >= ac.recipe.inputCount && fuelLeft && fuelLeft.count > 0) {
+                    // 材料が残っていれば連続調理
+                    const i1 = ac.block.getData('cookingIngred1');
+                    const i2 = ac.block.getData('cookingIngred2');
+                    const fl = ac.block.getData('cookingFuel');
+                    const canContinue = i1 && i1.count >= ac.recipe.inputCount &&
+                        (!ac.recipe.input2Id || (i2 && i2.count >= ac.recipe.input2Count)) &&
+                        fl && fl.count > 0;
+                    if (canContinue) {
                         ac.progress = 0;
                         ac.block.setData('cookingProgress', 0);
                     } else {
@@ -3527,127 +3756,221 @@
             isCookingPanelOpen = true;
             activeCookingBlock = block;
 
-            let wheatItem  = block.getData('cookingWheat')  || null;
-            let fuelItem   = block.getData('cookingFuel')   || null;
-            let resultItem = block.getData('cookingResult') || null;
-            let cooking    = block.getData('cookingSmelting') || false;
-            let cookProgress = block.getData('cookingProgress') || 0;
-            let currentRecipe = COOKING_RECIPES[0];
+            // 古いキー (cookingWheat) との後方互換
+            if (block.getData('cookingWheat') && !block.getData('cookingIngred1')) {
+                block.setData('cookingIngred1', block.getData('cookingWheat'));
+                block.setData('cookingWheat', null);
+            }
+
+            let recipeIdx = block.getData('cookingRecipeIdx') || 0;
+            let currentRecipe = COOKING_RECIPES[recipeIdx];
 
             const cx = scene.scale.width / 2;
             const cy = scene.scale.height / 2;
-            const panelW = 320;
-            const panelH = 280;
+            const panelW = 360;
+            const panelH = 320;
 
             cookingPanel = scene.add.container(cx, cy).setScrollFactor(0).setDepth(300);
 
-            const bg = scene.add.rectangle(0, 0, panelW, panelH, 0x000000, 0.9).setScrollFactor(0).setInteractive();
-            const title = scene.add.text(0, -panelH / 2 + 18, '調理台', { fontSize: '20px', color: '#ffcc44', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0);
-            const closeBtn = scene.add.text(panelW / 2 - 20, -panelH / 2 + 12, '✕', {
-                fontSize: '20px', color: '#ff6666', fontStyle: 'bold'
+            const bg = scene.add.rectangle(0, 0, panelW, panelH, 0x110a00, 0.95)
+                .setStrokeStyle(2, 0xaa6600).setScrollFactor(0).setInteractive();
+            const title = scene.add.text(0, -panelH / 2 + 18, '🍳 調理台', {
+                fontSize: '18px', color: '#ffcc44', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0);
+            const closeBtn = scene.add.text(panelW / 2 - 18, -panelH / 2 + 10, '✕', {
+                fontSize: '18px', color: '#ff6666'
             }).setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
             closeBtn.on('pointerdown', () => { playSE('ui_click'); closeCookingPanel(); });
             cookingPanel.add([bg, title, closeBtn]);
 
+            // ── レシピタブ ──
+            const tabY = -panelH / 2 + 46;
+            const tabW = 96; const tabH = 26;
+            const tabBgs = [], tabLabels = [];
+            COOKING_RECIPES.forEach((r, idx) => {
+                const tx = -panelW / 2 + 16 + idx * (tabW + 6) + tabW / 2;
+                const tb = scene.add.rectangle(tx, tabY, tabW, tabH, idx === recipeIdx ? 0x775511 : 0x333333)
+                    .setStrokeStyle(1, 0x886633).setScrollFactor(0).setInteractive({ useHandCursor: true });
+                const tl = scene.add.text(tx, tabY, r.name, { fontSize: '12px', color: '#fff' })
+                    .setOrigin(0.5).setScrollFactor(0);
+                tb.on('pointerdown', () => {
+                    if (block.getData('cookingSmelting')) return;
+                    recipeIdx = idx;
+                    currentRecipe = COOKING_RECIPES[idx];
+                    block.setData('cookingRecipeIdx', idx);
+                    tabBgs.forEach((b, i) => b.setFillStyle(i === idx ? 0x775511 : 0x333333));
+                    updateHint();
+                    playSE('ui_click');
+                });
+                tabBgs.push(tb);
+                tabLabels.push(tl);
+                cookingPanel.add([tb, tl]);
+            });
+
             const slotSize = 44;
-            // 小麦スロット
-            const wheatSlotBg = scene.add.rectangle(-60, -30, slotSize, slotSize, 0x333333).setStrokeStyle(2, 0x888888).setScrollFactor(0);
-            const wheatLabel  = scene.add.text(-60, -60, '小麦', { fontSize: '13px', color: '#aaa' }).setOrigin(0.5).setScrollFactor(0);
-            const wheatIcon   = scene.add.image(-60, -30, 'tileset', 32).setDisplaySize(32, 32).setScrollFactor(0).setVisible(false);
-            const wheatCount  = scene.add.text(-42, -18, '', { fontSize: '11px', color: '#fff' }).setScrollFactor(0);
-            cookingPanel.add([wheatSlotBg, wheatLabel, wheatIcon, wheatCount]);
+            const slotY = -30;
+
+            // 食材1スロット
+            const ing1SlotBg = scene.add.rectangle(-110, slotY, slotSize, slotSize, 0x333333)
+                .setStrokeStyle(2, 0x888888).setScrollFactor(0);
+            const ing1Label  = scene.add.text(-110, slotY - 30, '食材1', { fontSize: '12px', color: '#aaa' })
+                .setOrigin(0.5).setScrollFactor(0);
+            const ing1Icon   = scene.add.image(-110, slotY, 'tileset', 0).setDisplaySize(32, 32)
+                .setScrollFactor(0).setVisible(false);
+            const ing1Count  = scene.add.text(-92, slotY + 12, '', { fontSize: '11px', color: '#fff' })
+                .setScrollFactor(0);
+            cookingPanel.add([ing1SlotBg, ing1Label, ing1Icon, ing1Count]);
+
+            // 食材2スロット
+            const ing2SlotBg = scene.add.rectangle(-55, slotY, slotSize, slotSize, 0x222222)
+                .setStrokeStyle(2, 0x556655).setScrollFactor(0);
+            const ing2Label  = scene.add.text(-55, slotY - 30, '食材2', { fontSize: '12px', color: '#888' })
+                .setOrigin(0.5).setScrollFactor(0);
+            const ing2Icon   = scene.add.image(-55, slotY, 'tileset', 0).setDisplaySize(32, 32)
+                .setScrollFactor(0).setVisible(false);
+            const ing2Count  = scene.add.text(-37, slotY + 12, '', { fontSize: '11px', color: '#fff' })
+                .setScrollFactor(0);
+            cookingPanel.add([ing2SlotBg, ing2Label, ing2Icon, ing2Count]);
 
             // 燃料スロット
-            const fuelSlotBg = scene.add.rectangle(-60, 40, slotSize, slotSize, 0x333333).setStrokeStyle(2, 0x886633).setScrollFactor(0);
-            const fuelLabel  = scene.add.text(-60, 10, '燃料', { fontSize: '13px', color: '#aaa' }).setOrigin(0.5).setScrollFactor(0);
-            const fuelIcon   = scene.add.image(-60, 40, 'tileset', 0).setDisplaySize(32, 32).setScrollFactor(0).setVisible(false);
-            const fuelCountText = scene.add.text(-42, 52, '', { fontSize: '11px', color: '#fff' }).setScrollFactor(0);
-            cookingPanel.add([fuelSlotBg, fuelLabel, fuelIcon, fuelCountText]);
+            const fuelSlotBg = scene.add.rectangle(10, slotY, slotSize, slotSize, 0x333333)
+                .setStrokeStyle(2, 0xaa6622).setScrollFactor(0);
+            const fuelLabel  = scene.add.text(10, slotY - 30, '燃料', { fontSize: '12px', color: '#cc8833' })
+                .setOrigin(0.5).setScrollFactor(0);
+            const fuelIcon   = scene.add.image(10, slotY, 'tileset', 0).setDisplaySize(32, 32)
+                .setScrollFactor(0).setVisible(false);
+            const fuelCount  = scene.add.text(28, slotY + 12, '', { fontSize: '11px', color: '#fff' })
+                .setScrollFactor(0);
+            cookingPanel.add([fuelSlotBg, fuelLabel, fuelIcon, fuelCount]);
 
             // 矢印
-            const arrow = scene.add.text(10, -5, '→', { fontSize: '28px', color: '#666' }).setOrigin(0.5).setScrollFactor(0);
+            const arrow = scene.add.text(75, slotY, '→', { fontSize: '24px', color: '#666' })
+                .setOrigin(0.5).setScrollFactor(0);
             cookingPanel.add(arrow);
 
             // 完成品スロット
-            const resultSlotBg = scene.add.rectangle(80, -5, slotSize, slotSize, 0x333333).setStrokeStyle(2, 0x66aa66).setScrollFactor(0);
-            const resultLabel  = scene.add.text(80, -35, '完成品', { fontSize: '13px', color: '#aaa' }).setOrigin(0.5).setScrollFactor(0);
-            const resultIcon   = scene.add.image(80, -5, 'bread', 0).setDisplaySize(32, 32).setScrollFactor(0).setVisible(false);
-            const resultCountText = scene.add.text(98, 7, '', { fontSize: '11px', color: '#fff' }).setScrollFactor(0);
-            cookingPanel.add([resultSlotBg, resultLabel, resultIcon, resultCountText]);
+            const resultSlotBg = scene.add.rectangle(125, slotY, slotSize, slotSize, 0x223322)
+                .setStrokeStyle(2, 0x44aa44).setScrollFactor(0);
+            const resultLabel  = scene.add.text(125, slotY - 30, '完成品', { fontSize: '12px', color: '#88cc88' })
+                .setOrigin(0.5).setScrollFactor(0);
+            const resultIcon   = scene.add.image(125, slotY, 'tileset', 0).setDisplaySize(32, 32)
+                .setScrollFactor(0).setVisible(false);
+            const resultCount  = scene.add.text(143, slotY + 12, '', { fontSize: '11px', color: '#fff' })
+                .setScrollFactor(0);
+            cookingPanel.add([resultSlotBg, resultLabel, resultIcon, resultCount]);
 
             // レシピヒント
-            const hintText = scene.add.text(0, 55, '小麦x3 ＋ 燃料 → パン', { fontSize: '12px', color: '#aaa' }).setOrigin(0.5).setScrollFactor(0);
+            const hintText = scene.add.text(0, slotY + 42, '', { fontSize: '11px', color: '#aaa' })
+                .setOrigin(0.5).setScrollFactor(0);
             cookingPanel.add(hintText);
+            function updateHint() {
+                const r = currentRecipe;
+                let h = `${ITEM_NAMES[r.inputId] || '?'} x${r.inputCount}`;
+                if (r.input2Id) h += ` ＋ ${ITEM_NAMES[r.input2Id] || '?'} x${r.input2Count}`;
+                h += ` ＋ 燃料 → ${r.name}`;
+                hintText.setText(h);
+            }
+            updateHint();
 
             // 進捗バー
-            const progBarBg = scene.add.rectangle(0, 85, 200, 16, 0x222222).setScrollFactor(0);
-            const progBar   = scene.add.rectangle(-100, 85, 0, 14, 0xffaa33).setOrigin(0, 0.5).setScrollFactor(0);
-            const statusText = scene.add.text(0, 108, '', { fontSize: '13px', color: '#ccc' }).setOrigin(0.5).setScrollFactor(0);
+            const progBarBg  = scene.add.rectangle(0, slotY + 72, 240, 14, 0x222222).setScrollFactor(0);
+            const progBar    = scene.add.rectangle(-120, slotY + 72, 0, 12, 0xffaa33).setOrigin(0, 0.5).setScrollFactor(0);
+            const statusText = scene.add.text(0, slotY + 92, '', { fontSize: '12px', color: '#ccc' })
+                .setOrigin(0.5).setScrollFactor(0);
             cookingPanel.add([progBarBg, progBar, statusText]);
 
+            // スロット表示更新
             function updateSlots() {
-                wheatItem  = block.getData('cookingWheat');
-                fuelItem   = block.getData('cookingFuel');
-                resultItem = block.getData('cookingResult');
-                if (wheatItem && wheatItem.count > 0) {
-                    wheatIcon.setVisible(true);
-                    wheatCount.setText('x' + wheatItem.count);
-                } else { wheatIcon.setVisible(false); wheatCount.setText(''); }
-                if (fuelItem && fuelItem.count > 0) {
-                    const bd = BLOCK_DATA[fuelItem.type];
+                const i1 = block.getData('cookingIngred1');
+                const i2 = block.getData('cookingIngred2');
+                const fu = block.getData('cookingFuel');
+                const re = block.getData('cookingResult');
+
+                if (i1 && i1.count > 0) {
+                    const bd = BLOCK_DATA[i1.type];
+                    ing1Icon.setTexture(bd.texture, bd.frame).setVisible(true);
+                    ing1Count.setText('x' + i1.count);
+                } else { ing1Icon.setVisible(false); ing1Count.setText(''); }
+
+                if (i2 && i2.count > 0) {
+                    const bd = BLOCK_DATA[i2.type];
+                    ing2Icon.setTexture(bd.texture, bd.frame).setVisible(true);
+                    ing2Count.setText('x' + i2.count);
+                } else { ing2Icon.setVisible(false); ing2Count.setText(''); }
+
+                if (fu && fu.count > 0) {
+                    const bd = BLOCK_DATA[fu.type];
                     fuelIcon.setTexture(bd.texture, bd.frame).setVisible(true);
-                    fuelCountText.setText('x' + fuelItem.count);
-                } else { fuelIcon.setVisible(false); fuelCountText.setText(''); }
-                if (resultItem && resultItem.count > 0) {
-                    resultIcon.setVisible(true);
-                    resultCountText.setText('x' + resultItem.count);
-                } else { resultIcon.setVisible(false); resultCountText.setText(''); }
+                    fuelCount.setText('x' + fu.count);
+                } else { fuelIcon.setVisible(false); fuelCount.setText(''); }
+
+                if (re && re.count > 0) {
+                    const bd = BLOCK_DATA[re.type];
+                    resultIcon.setTexture(bd.texture, bd.frame).setVisible(true);
+                    resultCount.setText('x' + re.count);
+                } else { resultIcon.setVisible(false); resultCount.setText(''); }
             }
             updateSlots();
-
-            if (cooking) {
-                const ratio = cookProgress / currentRecipe.time;
-                progBar.setSize(200 * ratio, 14);
-                statusText.setText('調理中...');
-            }
 
             // UI更新タイマー
             const uiUpdateTimer = scene.time.addEvent({
                 delay: 100, loop: true,
                 callback: () => {
-                    cooking     = block.getData('cookingSmelting') || false;
-                    cookProgress = block.getData('cookingProgress') || 0;
+                    const cooking     = block.getData('cookingSmelting') || false;
+                    const cookProgress = block.getData('cookingProgress') || 0;
                     updateSlots();
                     if (cooking) {
                         const ratio = Math.min(1, cookProgress / currentRecipe.time);
-                        progBar.setSize(200 * ratio, 14).setFillStyle(0xffaa33);
-                        statusText.setText('調理中...');
-                    } else if (resultItem && resultItem.count > 0) {
-                        progBar.setSize(200, 14).setFillStyle(0x44aa44);
-                        statusText.setText('完成品があります');
+                        progBar.setSize(240 * ratio, 12).setFillStyle(0xffaa33);
+                        statusText.setText('🔥 調理中...');
                     } else {
-                        progBar.setSize(0, 14);
-                        if (statusText.text === '調理中...') statusText.setText('');
+                        const re = block.getData('cookingResult');
+                        if (re && re.count > 0) {
+                            progBar.setSize(240, 12).setFillStyle(0x44aa44);
+                            statusText.setText('✅ 完成品があります');
+                        } else {
+                            progBar.setSize(0, 12);
+                            statusText.setText('');
+                        }
                     }
                 }
             });
             cookingPanel.setData('uiTimer', uiUpdateTimer);
 
-            // 小麦スロットクリック
-            wheatSlotBg.setInteractive({ useHandCursor: true });
-            wheatSlotBg.on('pointerdown', () => {
+            // 食材1スロットクリック
+            ing1SlotBg.setInteractive({ useHandCursor: true });
+            ing1SlotBg.on('pointerdown', () => {
                 if (block.getData('cookingSmelting')) return;
-                wheatItem = block.getData('cookingWheat');
-                if (wheatItem && wheatItem.count > 0) {
-                    const bd = BLOCK_DATA[wheatItem.type];
-                    addInventoryItem(wheatItem.type, wheatItem.count, bd.texture, bd.frame);
-                    block.setData('cookingWheat', null);
-                    updateSlots(); updateInventoryUI(); playSE('ui_click');
-                    return;
+                const i1 = block.getData('cookingIngred1');
+                if (i1 && i1.count > 0) {
+                    const bd = BLOCK_DATA[i1.type];
+                    addInventoryItem(i1.type, i1.count, bd.texture, bd.frame);
+                    block.setData('cookingIngred1', null);
+                    updateSlots(); updateInventoryUI(); playSE('ui_click'); return;
                 }
                 const held = inventory[activeSlotIndex];
-                if (held && held.count > 0 && held.type === BLOCK_TYPES.WHEAT) {
-                    block.setData('cookingWheat', { type: held.type, count: held.count });
+                if (held && held.count > 0 && held.type === currentRecipe.inputId) {
+                    block.setData('cookingIngred1', { type: held.type, count: held.count });
+                    held.count = 0; held.type = null; held.texture = null;
+                    updateSlots(); updateInventoryUI(); playSE('ui_click');
+                } else { playSE('ui_error'); }
+            });
+
+            // 食材2スロットクリック
+            ing2SlotBg.setInteractive({ useHandCursor: true });
+            ing2SlotBg.on('pointerdown', () => {
+                if (block.getData('cookingSmelting')) return;
+                if (!currentRecipe.input2Id) { playSE('ui_error'); return; }
+                const i2 = block.getData('cookingIngred2');
+                if (i2 && i2.count > 0) {
+                    const bd = BLOCK_DATA[i2.type];
+                    addInventoryItem(i2.type, i2.count, bd.texture, bd.frame);
+                    block.setData('cookingIngred2', null);
+                    updateSlots(); updateInventoryUI(); playSE('ui_click'); return;
+                }
+                const held = inventory[activeSlotIndex];
+                if (held && held.count > 0 && held.type === currentRecipe.input2Id) {
+                    block.setData('cookingIngred2', { type: held.type, count: held.count });
                     held.count = 0; held.type = null; held.texture = null;
                     updateSlots(); updateInventoryUI(); playSE('ui_click');
                 } else { playSE('ui_error'); }
@@ -3657,13 +3980,12 @@
             fuelSlotBg.setInteractive({ useHandCursor: true });
             fuelSlotBg.on('pointerdown', () => {
                 if (block.getData('cookingSmelting')) return;
-                fuelItem = block.getData('cookingFuel');
-                if (fuelItem && fuelItem.count > 0) {
-                    const bd = BLOCK_DATA[fuelItem.type];
-                    addInventoryItem(fuelItem.type, fuelItem.count, bd.texture, bd.frame);
+                const fu = block.getData('cookingFuel');
+                if (fu && fu.count > 0) {
+                    const bd = BLOCK_DATA[fu.type];
+                    addInventoryItem(fu.type, fu.count, bd.texture, bd.frame);
                     block.setData('cookingFuel', null);
-                    updateSlots(); updateInventoryUI(); playSE('ui_click');
-                    return;
+                    updateSlots(); updateInventoryUI(); playSE('ui_click'); return;
                 }
                 const held = inventory[activeSlotIndex];
                 if (held && held.count > 0 && FUEL_ITEMS.has(held.type)) {
@@ -3676,33 +3998,43 @@
             // 完成品スロットクリック → 回収
             resultSlotBg.setInteractive({ useHandCursor: true });
             resultSlotBg.on('pointerdown', () => {
-                resultItem = block.getData('cookingResult');
-                if (resultItem && resultItem.count > 0) {
-                    const bd = BLOCK_DATA[resultItem.type];
-                    addInventoryItem(resultItem.type, resultItem.count, bd.texture, bd.frame);
+                const re = block.getData('cookingResult');
+                if (re && re.count > 0) {
+                    const bd = BLOCK_DATA[re.type];
+                    addInventoryItem(re.type, re.count, bd.texture, bd.frame);
                     block.setData('cookingResult', null);
                     updateSlots(); updateInventoryUI(); playSE('ui_click');
                 }
             });
 
             // 調理開始ボタン
-            const cookBtn = scene.add.rectangle(0, panelH / 2 - 30, 120, 36, 0x775511).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const cookBtnText = scene.add.text(0, panelH / 2 - 30, '調理開始', { fontSize: '15px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0);
+            const cookBtn = scene.add.rectangle(0, panelH / 2 - 28, 140, 36, 0x775511)
+                .setStrokeStyle(1, 0xffaa33).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            const cookBtnText = scene.add.text(0, panelH / 2 - 28, '🍳 調理開始', {
+                fontSize: '14px', color: '#fff', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0);
             cookingPanel.add([cookBtn, cookBtnText]);
 
             cookBtn.on('pointerdown', () => {
                 if (block.getData('cookingSmelting')) return;
-                const wheat = block.getData('cookingWheat');
-                const fuel  = block.getData('cookingFuel');
-                if (!wheat || wheat.count < currentRecipe.inputCount || !fuel || fuel.count <= 0) {
+                const i1 = block.getData('cookingIngred1');
+                const i2 = block.getData('cookingIngred2');
+                const fu = block.getData('cookingFuel');
+                const r  = currentRecipe;
+                const ok1 = i1 && i1.count >= r.inputCount;
+                const ok2 = !r.input2Id || (i2 && i2.count >= r.input2Count);
+                const okF = fu && fu.count > 0;
+                if (!ok1 || !ok2 || !okF) {
                     playSE('ui_error');
-                    statusText.setText('小麦x3と燃料が必要です');
+                    let msg = `${ITEM_NAMES[r.inputId]} x${r.inputCount}`;
+                    if (r.input2Id) msg += ` ＋ ${ITEM_NAMES[r.input2Id]} x${r.input2Count}`;
+                    statusText.setText(msg + ' ＋ 燃料が必要です');
                     return;
                 }
                 block.setData('cookingSmelting', true);
                 block.setData('cookingProgress', 0);
                 playSE('ui_click');
-                activeCookingTables.push({ block, recipe: currentRecipe, progress: 0 });
+                activeCookingTables.push({ block, recipe: r, progress: 0 });
             });
 
             bg.on('pointerdown', () => {});
@@ -3825,6 +4157,9 @@
             { type: BLOCK_TYPES.HALF_BLOCK,     name: 'ハーフブロック',  desc: '作業台で木1個からハーフブロック4個作成。通常ブロックの半分の高さ。ジャンプせず8px段差を乗り越えられる。' },
             { type: BLOCK_TYPES.COOKING_TABLE,  name: '調理台',          desc: '作業台で木3個から作成。小麦3個＋燃料から、HP3回復するパンを作れる。' },
             { type: BLOCK_TYPES.BREAD,          name: 'パン',            desc: '調理台で小麦3個から作れる食べ物。HP3回復。' },
+            { type: BLOCK_TYPES.EGG,            name: 'たまご',          desc: 'ニワトリが産む新鮮なたまご。調理台で目玉焼きやたまごサンドに加工できる。' },
+            { type: BLOCK_TYPES.FRIED_EGG,      name: '目玉焼き',        desc: '調理台でたまご1個から作れる食べ物。HP3回復。' },
+            { type: BLOCK_TYPES.EGG_SANDWICH,   name: 'たまごサンド',    desc: '調理台で小麦1個＋たまご1個から作れる豪華な食べ物。HP5回復。' },
             { type: BLOCK_TYPES.TABLE_L,        name: 'テーブル',        desc: '作業台で木3個から作成。横幅2ブロックの大きなテーブル。イスと組み合わせて部屋を彩ろう。' },
             { type: BLOCK_TYPES.CHAIR,          name: 'イス',            desc: '作業台で木2個からイス2個作成。テーブルの横に置いて使う家具。' },
         ];
@@ -3841,7 +4176,7 @@
             { name: '手持ち', color: 0xddaa44,
               types: new Set([BLOCK_TYPES.STONE_PICKAXE, BLOCK_TYPES.IRON_PICKAXE, BLOCK_TYPES.IRON_INGOT]) },
             { name: '消費', color: 0x66cc66,
-              types: new Set([BLOCK_TYPES.APPLE, BLOCK_TYPES.WHEAT_SEED, BLOCK_TYPES.WHEAT, BLOCK_TYPES.BONE, BLOCK_TYPES.BREAD]) },
+              types: new Set([BLOCK_TYPES.APPLE, BLOCK_TYPES.WHEAT_SEED, BLOCK_TYPES.WHEAT, BLOCK_TYPES.BONE, BLOCK_TYPES.BREAD, BLOCK_TYPES.EGG, BLOCK_TYPES.FRIED_EGG, BLOCK_TYPES.EGG_SANDWICH]) },
             { name: '設置', color: 0xcc8844,
               types: new Set([BLOCK_TYPES.WORKBENCH, BLOCK_TYPES.FURNACE, BLOCK_TYPES.COOKING_TABLE, BLOCK_TYPES.TABLE, BLOCK_TYPES.TABLE_L, BLOCK_TYPES.CHAIR, BLOCK_TYPES.STORAGE_CHEST, BLOCK_TYPES.STRAW_BED_L, BLOCK_TYPES.TORCH, BLOCK_TYPES.HANGING_LAMP, BLOCK_TYPES.SIGN_OPEN, BLOCK_TYPES.DOOR_B, BLOCK_TYPES.STAIR]) },
             { name: '建材', color: 0x8888cc,
@@ -4053,23 +4388,40 @@
             isEncyclopediaOpen = false;
         }
 
-        // === 生き物図鑑データ ===
-        const CREATURE_BOOK = [
-            // 人間
-            { id: 'merchant', name: '商人', desc: '各地を旅する行商人。さまざまなアイテムを売っている。', texture: 'merchant', frame: 0, category: 'human' },
-            // 謎のイキモノ
-            { id: 'renji', name: 'レンジ', desc: 'ふわふわ飛べる電子レンジのような謎の生き物。知的に喋ることができ、冒険者をサポートしてくれる。', texture: 'renji', frame: 0, category: 'creature' },
-            { id: 'customer', name: '毛玉宇宙人', desc: '宇宙からふわふわ降りてくる不思議な生き物。気に入ったアイテムをコインで買ってくれる。', texture: 'alien', frame: 0, category: 'creature' },
-            { id: 'slime', name: 'スライム', desc: 'ぷよぷよとした謎の生命体。地下深くに生息し、近づくと飛びかかってくる。', texture: 'slime', frame: 0, category: 'creature' },
-            // 動物
-            { id: 'rabbit', name: 'うさぎ', desc: '草原や地下に住む小動物。近づくと逃げてしまう。', texture: 'rabbit', frame: 0, category: 'animal' },
-            { id: 'dog', name: '犬', desc: '骨を与えると仲間になる忠実な動物。', texture: 'dog', frame: 0, category: 'animal' },
-            { id: 'bird0', name: 'すずめ', desc: '茶色い小鳥。空を飛び、時々木や地面で休む。', texture: 'bird0', frame: 0, category: 'animal' },
-            { id: 'bird1', name: 'ルリビタキ', desc: '青い羽根が美しい小鳥。', texture: 'bird1', frame: 0, category: 'animal' },
-            { id: 'bird2', name: 'コマドリ', desc: 'オレンジ色の胸が特徴的な小鳥。', texture: 'bird2', frame: 0, category: 'animal' },
-            { id: 'bird3', name: 'ウグイス', desc: '緑色の羽根を持つ小鳥。', texture: 'bird3', frame: 0, category: 'animal' },
-            { id: 'bird4', name: 'カナリア', desc: '鮮やかな黄色が目を引く小鳥。', texture: 'bird4', frame: 0, category: 'animal' },
-        ];
+        // === 生き物図鑑データ（creatures.json の名前・説明を反映）===
+        function buildCreatureBook(d) {
+            const g = function(key, fallbackName, fallbackDesc) {
+                const entry = d && d[key];
+                return { name: (entry && entry.name) || fallbackName, desc: (entry && entry.desc) || fallbackDesc };
+            };
+            const birdSpecies = (d && d.bird && d.bird.species) || [
+                { id: 'bird0', name: 'すずめ',     desc: '茶色い小鳥。空を飛び、時々木や地面で休む。' },
+                { id: 'bird1', name: 'ルリビタキ', desc: '青い羽根が美しい小鳥。' },
+                { id: 'bird2', name: 'コマドリ',   desc: 'オレンジ色の胸が特徴的な小鳥。' },
+                { id: 'bird3', name: 'ウグイス',   desc: '緑色の羽根を持つ小鳥。' },
+                { id: 'bird4', name: 'カナリア',   desc: '鮮やかな黄色が目を引く小鳥。' }
+            ];
+            const merchantInfo = g('merchant', '商人', '各地を旅する行商人。さまざまなアイテムを売っている。');
+            const renjiInfo    = g('renji',    'レンジ', 'ふわふわ飛べる電子レンジのような謎の生き物。知的に喋ることができ、冒険者をサポートしてくれる。');
+            const customerInfo = g('customer', '毛玉宇宙人', '宇宙からふわふわ降りてくる不思議な生き物。気に入ったアイテムをコインで買ってくれる。');
+            const slimeInfo    = g('slime',    'スライム', 'ぷよぷよとした謎の生命体。地下深くに生息し、近づくと飛びかかってくる。');
+            const rabbitInfo   = g('rabbit',   'うさぎ',   '草原や地下に住む小動物。近づくと逃げてしまう。');
+            const dogInfo      = g('dog',      '犬',       '骨を与えると仲間になる忠実な動物。');
+            const chickenInfo  = g('chicken',  'ニワトリ', '地上をてくてく歩く鳥。しばらく待つとたまごをくれる。');
+            return [
+                { id: 'merchant', name: merchantInfo.name, desc: merchantInfo.desc, texture: 'merchant', frame: 0, category: 'human' },
+                { id: 'renji',    name: renjiInfo.name,    desc: renjiInfo.desc,    texture: 'renji',    frame: 0, category: 'creature' },
+                { id: 'customer', name: customerInfo.name, desc: customerInfo.desc, texture: 'alien',    frame: 0, category: 'creature' },
+                { id: 'slime',    name: slimeInfo.name,    desc: slimeInfo.desc,    texture: 'slime',    frame: 0, category: 'creature' },
+                { id: 'rabbit',   name: rabbitInfo.name,   desc: rabbitInfo.desc,   texture: 'rabbit',   frame: 0, category: 'animal' },
+                { id: 'dog',      name: dogInfo.name,      desc: dogInfo.desc,      texture: 'dog',      frame: 0, category: 'animal' },
+                { id: 'chicken',  name: chickenInfo.name,  desc: chickenInfo.desc,  texture: 'chicken',  frame: 0, category: 'animal' },
+            ].concat(birdSpecies.map(function(sp) {
+                return { id: sp.id, name: sp.name, desc: sp.desc, texture: sp.id, frame: 0, category: 'animal' };
+            }));
+        }
+        // creatures.json 読み込み前はデフォルト値で初期化、applyCreatureData() で上書き
+        let CREATURE_BOOK = buildCreatureBook(null);
 
         const CREATURE_BOOK_CATEGORIES = [
             { name: '人間', color: 0xcc6666, key: 'human' },
@@ -4522,6 +4874,13 @@
                     if (b.getData('typeId') === BLOCK_TYPES.STAIR) {
                         entry.stairFlipped = b.getData('stairFlipped') || false;
                     }
+                    if (b.getData('typeId') === BLOCK_TYPES.COOKING_TABLE) {
+                        entry.cookingIngred1   = b.getData('cookingIngred1') || null;
+                        entry.cookingIngred2   = b.getData('cookingIngred2') || null;
+                        entry.cookingFuel      = b.getData('cookingFuel')    || null;
+                        entry.cookingResult    = b.getData('cookingResult')  || null;
+                        entry.cookingRecipeIdx = b.getData('cookingRecipeIdx') || 0;
+                    }
                     return entry;
                 });
 
@@ -4593,6 +4952,14 @@
                     colorIndex: dg.getData('colorIndex') !== undefined ? dg.getData('colorIndex') : 0
                 }));
 
+            // ニワトリを保存
+            const savedChickens = chickens
+                .filter(ch => ch.active)
+                .map(ch => ({
+                    x: Math.round(ch.x),
+                    y: Math.round(ch.y)
+                }));
+
             // 壁紙を保存
             const savedWalls = [];
             for (const [key, wall] of wallMap) {
@@ -4623,6 +4990,7 @@
                 merchants: savedMerchants,
                 rabbits: savedRabbits,
                 dogs: savedDogs,
+                chickens: savedChickens,
                 homePosition: homePosition,
                 money: playerMoney,
                 activeSlot: activeSlotIndex,
@@ -4656,14 +5024,18 @@
         let isDragging = false;
 
         function createInventoryUI(scene) {
-            const slotSize = 50;
-            const padding = 10;
+            // スマホは画面幅に合わせてスロットをコンパクトに
+            const slotSize = isMobile ? 34 : 50;
+            const padding  = isMobile ?  2 : 10;
+            const iconSize = isMobile ? 22 : 32;
+            const fontSize = isMobile ? '11px' : '18px';
+            const y        = isMobile ? 26 : 40;
             const startX = scene.scale.width / 2 - (INVENTORY_SIZE * (slotSize + padding)) / 2 + slotSize / 2;
-            const y = 40;
 
             // ドラッグ用アイコン（1度だけ作成）
             dragIcon = scene.add.image(0, 0, 'tileset', 0)
-                .setDisplaySize(36, 36).setScrollFactor(0).setDepth(160).setVisible(false).setAlpha(0.8);
+                .setDisplaySize(isMobile ? 26 : 36, isMobile ? 26 : 36)
+                .setScrollFactor(0).setDepth(160).setVisible(false).setAlpha(0.8);
 
             for (let i = 0; i < INVENTORY_SIZE; i++) {
                 const x = startX + i * (slotSize + padding);
@@ -4672,13 +5044,14 @@
                     .setScrollFactor(0).setDepth(100).setInteractive();
 
                 const border = scene.add.rectangle(x, y, slotSize, slotSize)
-                    .setStrokeStyle(2, 0x888888).setScrollFactor(0).setDepth(101);
+                    .setStrokeStyle(isMobile ? 1.5 : 2, 0x888888).setScrollFactor(0).setDepth(101);
 
                 const icon = scene.add.image(x, y, 'dirt')
-                    .setDisplaySize(32, 32).setScrollFactor(0).setDepth(102).setVisible(false);
+                    .setDisplaySize(iconSize, iconSize).setScrollFactor(0).setDepth(102).setVisible(false);
 
-                const text = scene.add.text(x + slotSize/2 - 5, y + slotSize/2 - 5, '0',
-                    { fontSize: '18px', color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 3 })
+                const textOff = isMobile ? 3 : 5;
+                const text = scene.add.text(x + slotSize/2 - textOff, y + slotSize/2 - textOff, '0',
+                    { fontSize: fontSize, color: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: isMobile ? 2 : 3 })
                     .setOrigin(1, 1).setScrollFactor(0).setDepth(103).setVisible(false);
 
                 bg.on('pointerdown', (pointer, localX, localY, event) => {
@@ -5708,9 +6081,11 @@
 
         // 食べ物定義: type → 回復量
         const FOOD_ITEMS = {
-            [BLOCK_TYPES.APPLE]: 2,  // りんご: HP2回復
-            [BLOCK_TYPES.WHEAT]: 1,  // 小麦: HP1回復
-            [BLOCK_TYPES.BREAD]: 3,  // パン: HP3回復
+            [BLOCK_TYPES.APPLE]: 2,        // りんご: HP2回復
+            [BLOCK_TYPES.WHEAT]: 1,        // 小麦: HP1回復
+            [BLOCK_TYPES.BREAD]: 3,        // パン: HP3回復
+            [BLOCK_TYPES.FRIED_EGG]: 3,    // 目玉焼き: HP3回復
+            [BLOCK_TYPES.EGG_SANDWICH]: 5, // たまごサンド: HP5回復
         };
 
         let lastEatTime = 0;
@@ -5857,7 +6232,7 @@
             const bd = scene.add.sprite(bx, by, bk, 1).setDepth(4);
             bd.setData('species', speciesId);   // 鳥の種類 (0-4)
             bd.setData('state', 'flying');      // flying | landing | perched | takeoff
-            bd.setData('vx', (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60));
+            bd.setData('vx', (Math.random() < 0.5 ? -1 : 1) * (BIRD_MIN_FLY_SPEED + Math.random() * BIRD_FLY_SPEED_RANGE));
             bd.setData('vy', 0);
             bd.setData('timer', 0);
             bd.setData('stateTimer', 5000 + Math.random() * 10000); // 次の状態変更まで
@@ -5967,7 +6342,7 @@
                     if (timer > bd.getData('stateTimer')) {
                         bd.setData('state', 'takeoff');
                         bd.setData('timer', 0);
-                        bd.setData('vx', (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60));
+                        bd.setData('vx', (Math.random() < 0.5 ? -1 : 1) * (BIRD_MIN_FLY_SPEED + Math.random() * BIRD_FLY_SPEED_RANGE));
                     }
                 } else if (state === 'takeoff') {
                     // 上昇して飛行状態へ
@@ -6045,6 +6420,110 @@
             }
             dogs.push(dg);
             return dg;
+        }
+
+        // ===== ニワトリ =====
+        const CHICKEN_COLORS = [0xffffff, 0xffee88, 0xff9966, 0xffccaa, 0xaaaaaa];
+        const CHICKEN_EGG_INTERVAL_MIN = 25000; // 最短25秒でたまごを産む
+        const CHICKEN_EGG_INTERVAL_MAX = 60000; // 最長60秒
+
+        function spawnChicken(scene, x, y) {
+            const ch = scene.physics.add.sprite(x, y, 'chicken', 0);
+            ch.setCollideWorldBounds(true);
+            ch.body.setSize(22, 22);
+            ch.body.setOffset(5, 10);
+            ch.setDepth(5);
+            scene.physics.add.collider(ch, platforms, null, vinePassthrough);
+            ch.setData('dir', Math.random() < 0.5 ? -1 : 1);
+            ch.setData('timer', 0);
+            ch.setData('nextChange', 2000 + Math.random() * 3000);
+            ch.setData('nextEgg', CHICKEN_EGG_INTERVAL_MIN + Math.random() * (CHICKEN_EGG_INTERVAL_MAX - CHICKEN_EGG_INTERVAL_MIN));
+            ch.setData('paused', false);
+            const ci = Math.floor(Math.random() * CHICKEN_COLORS.length);
+            ch.setTint(CHICKEN_COLORS[ci]);
+            ch.setData('colorIndex', ci);
+            ch.anims.play('chicken_idle', true);
+            chickens.push(ch);
+            return ch;
+        }
+
+        function updateChickens(scene, delta) {
+            const dt = delta / 1000;
+            for (let i = chickens.length - 1; i >= 0; i--) {
+                const ch = chickens[i];
+                if (!ch || !ch.active) { chickens.splice(i, 1); continue; }
+
+                // タイマー更新
+                const timer = ch.getData('timer') + delta;
+                ch.setData('timer', timer);
+
+                // たまご産む
+                let nextEgg = ch.getData('nextEgg');
+                if (timer >= nextEgg) {
+                    ch.setData('nextEgg', timer + CHICKEN_EGG_INTERVAL_MIN + Math.random() * (CHICKEN_EGG_INTERVAL_MAX - CHICKEN_EGG_INTERVAL_MIN));
+                    // プレイヤーが600px以内にいる場合のみインベントリに追加
+                    const dx = player.x - ch.x;
+                    const dy = player.y - ch.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist <= 600) {
+                        const eggData = BLOCK_DATA[BLOCK_TYPES.EGG];
+                        addInventoryItem(BLOCK_TYPES.EGG, 1, eggData.texture, eggData.frame);
+                        updateInventoryUI();
+                        // たまご通知テキスト
+                        const noteText = scene.add.text(ch.x, ch.y - 28, '🥚 たまご！', {
+                            fontSize: '13px', color: '#ffffaa', fontStyle: 'bold',
+                            stroke: '#000', strokeThickness: 3
+                        }).setOrigin(0.5).setDepth(200);
+                        scene.tweens.add({
+                            targets: noteText, y: noteText.y - 32, alpha: 0,
+                            duration: 1500, onComplete: () => noteText.destroy()
+                        });
+                        playSE('pickup_apple');
+                    }
+                }
+
+                // ===== マップ外落下チェック =====
+                // 地面より BLOCK_SIZE*6 以上下に落ちたらプレイヤー近くの安全な地表にテレポート
+                if (ch.y > WORLD_GROUND_Y + BLOCK_SIZE * 6 && _findSafeRabbitPos) {
+                    const safePos = _findSafeRabbitPos(200);
+                    ch.setPosition(safePos.x, safePos.y);
+                    ch.body.reset(safePos.x, safePos.y);
+                }
+
+                // 歩行 AI（ランダムウォーク）
+                let paused = ch.getData('paused');
+                const nextChange = ch.getData('nextChange');
+                if (timer >= nextChange) {
+                    paused = Math.random() < 0.3;
+                    ch.setData('paused', paused);
+                    ch.setData('dir', Math.random() < 0.5 ? -1 : 1);
+                    ch.setData('nextChange', timer + 1500 + Math.random() * 3000);
+                }
+
+                if (paused || !ch.body.blocked.down) {
+                    ch.body.setVelocityX(0);
+                    ch.anims.play('chicken_idle', true);
+                } else {
+                    let dir = ch.getData('dir');
+
+                    // 崖端検出: 進行方向の1ブロック先に足場がなければ反転
+                    const bsC = BLOCK_SIZE;
+                    const aheadX = ch.x + dir * (11 + bsC);          // 体の端 + 1ブロック先
+                    const belowY = ch.y + bsC * 1.5;                  // 足元の1ブロック下
+                    const groundAhead = bkGetAt(
+                        Math.round(aheadX / bsC) * bsC,
+                        Math.round(belowY / bsC) * bsC
+                    );
+                    if (!groundAhead) {
+                        dir = -dir;
+                        ch.setData('dir', dir);
+                    }
+
+                    ch.body.setVelocityX(dir * 40);
+                    ch.setFlipX(dir < 0);
+                    ch.anims.play('chicken_walk', true);
+                }
+            }
         }
 
         // ===== 「話しかけたい」吹き出し生成ヘルパー =====
@@ -6190,28 +6669,11 @@
         }
 
         // === スライム（モンスター）システム ===
-        const SLIME_MAX = 8;              // 同時に存在できる最大数
-        const SLIME_SPAWN_INTERVAL = 8000; // スポーン間隔 (ms)
-        const SLIME_HP = 3;               // スライムの体力
-        const SLIME_DETECT_RANGE = 200;   // プレイヤー検知距離
-        const SLIME_SPEED = 80;           // 移動速度
-        const SLIME_DAMAGE = 1;           // プレイヤーへのダメージ
-        const SLIME_DAMAGE_COOLDOWN = 1000; // ダメージのクールダウン (ms)
-        const DOG_ATTACK_RANGE = 100;     // 犬がスライムを検知する距離
-        const DOG_ATTACK_DAMAGE = 2;      // 犬の攻撃力
-        const DOG_ATTACK_COOLDOWN = 800;  // 犬の攻撃間隔 (ms)
+        // ※ SLIME_MAX, SLIME_SPAWN_INTERVAL, SLIME_HP, SLIME_DETECT_RANGE, SLIME_SPEED,
+        //   SLIME_DAMAGE, SLIME_DAMAGE_COOLDOWN, DOG_ATTACK_RANGE, DOG_ATTACK_DAMAGE,
+        //   DOG_ATTACK_COOLDOWN, SLIME_DROPS は creatures.json から読み込まれる
         let lastSlimeSpawn = 0;
         let lastSlimeDamageTime = 0;      // プレイヤーへのダメージクールダウン
-
-        // スライムドロップテーブル
-        const SLIME_DROPS = [
-            { type: BLOCK_TYPES.GOLD,        count: 1, weight: 25, texture: 'tileset', frame: 8 },
-            { type: BLOCK_TYPES.IRON,         count: 1, weight: 15, texture: 'tileset', frame: 12 },
-            { type: BLOCK_TYPES.APPLE,        count: 1, weight: 20, texture: 'tileset', frame: 13 },
-            { type: BLOCK_TYPES.TORCH,        count: 2, weight: 15, texture: 'tileset', frame: 5 },
-            { type: BLOCK_TYPES.STONE,        count: 3, weight: 15, texture: 'tileset', frame: 2 },
-            { type: null,                     count: 0, weight: 10 }, // ドロップなし
-        ];
 
         function spawnSlime(scene, x, y) {
             const sl = scene.physics.add.sprite(x, y, 'slime');
@@ -6842,6 +7304,9 @@
             [BLOCK_TYPES.BONE]: 8,
             [BLOCK_TYPES.COOKING_TABLE]: 18,
             [BLOCK_TYPES.BREAD]: 20,
+            [BLOCK_TYPES.EGG]: 8,
+            [BLOCK_TYPES.FRIED_EGG]: 18,
+            [BLOCK_TYPES.EGG_SANDWICH]: 35,
             [BLOCK_TYPES.TABLE_L]: 15,
             [BLOCK_TYPES.CHAIR]: 8
         };
@@ -7023,6 +7488,43 @@
             }
         }
 
+        // テーブル展示アイテムの最高価格を調べてレア度ブーストを計算する
+        function calcShopRarityBoost() {
+            if (!tableItems || tableItems.length === 0) return 1.0;
+            let maxPrice = 0;
+            for (const ti of tableItems) {
+                if (!ti.tableBlock || !ti.tableBlock.active) continue;
+                if (!isInShopZone(ti.tableBlock.x, ti.tableBlock.y)) continue;
+                const price = getItemPrice(ti.itemType);
+                if (price > maxPrice) maxPrice = price;
+            }
+            // 価格に応じてブーストを上げる（最大3倍のレア枠補正）
+            if (maxPrice >= 100) return 3.0;   // ルビー以上 → 超ブースト
+            if (maxPrice >= 60)  return 2.0;   // 鉄ピッケル等 → 大ブースト
+            if (maxPrice >= 30)  return 1.5;   // 鉄インゴット等 → 中ブースト
+            if (maxPrice >= 15)  return 1.2;   // 鉄鉱石等 → 小ブースト
+            return 1.0;
+        }
+
+        // 重み付き抽選で毛玉宇宙人の色を1つ選ぶ（レアアイテム展示でレア客が来やすくなる）
+        function pickAlienColor() {
+            if (!ALIEN_COLORS || ALIEN_COLORS.length === 0) return { color: 0xffaabb, name: 'ピンク', rarity: 'コモン' };
+            const boost = calcShopRarityBoost();
+            // レア度の低いもの（上位）の重みを下げ、高いもの（下位）の重みを上げることでブースト
+            const weights = ALIEN_COLORS.map(function(c, idx) {
+                // インデックスが大きいほどレアな設定。ブーストを後半に集中
+                const rareFactor = (idx / (ALIEN_COLORS.length - 1)); // 0.0〜1.0
+                return c.weight * (1 + rareFactor * (boost - 1));
+            });
+            const totalWeight = weights.reduce(function(s, w) { return s + w; }, 0);
+            let r = Math.random() * totalWeight;
+            for (let i = 0; i < ALIEN_COLORS.length; i++) {
+                r -= weights[i];
+                if (r <= 0) return ALIEN_COLORS[i];
+            }
+            return ALIEN_COLORS[ALIEN_COLORS.length - 1];
+        }
+
         function trySpawnCustomer(scene) {
             if (customers.length >= MAX_CUSTOMERS) return;
 
@@ -7058,6 +7560,10 @@
             cs.setDepth(6);
             cs.anims.play('alien_float', true);
 
+            // 重み付き抽選で色を決定
+            const alienColor = pickAlienColor();
+            cs.setTint(alienColor.color);
+
             // ホバー目標: テーブルの少し上
             const hoverX = table.x + (Math.random() < 0.5 ? -18 : 18);
             const hoverY = table.y - 26;
@@ -7075,8 +7581,81 @@
                 waitTimer: 0,
                 leaveTimer: 0,
                 bobTime: 0,
-                wobblePhase: Math.random() * Math.PI * 2  // 横揺れ初期位相
+                wobblePhase: Math.random() * Math.PI * 2,  // 横揺れ初期位相
+                alienColor  // 色情報（名前・レア度）
             });
+        }
+
+        // ============================================================
+        // === 上空を飛ぶ背景宇宙人システム ===
+        // ============================================================
+        function trySpawnSkyAlien(scene, time) {
+            if (time - lastSkyAlienSpawn < SKY_ALIEN_SPAWN_INTERVAL) return;
+            if (skyAliens.length >= SKY_ALIEN_MAX) return;
+            lastSkyAlienSpawn = time;
+
+            const cam = scene.cameras.main;
+            const camL = cam.scrollX;
+            const camR = camL + cam.width;
+
+            // 地表より上の空域でランダムなY（ワールド座標）
+            const skyTopY  = 60;
+            const skyBotY  = 560;  // groundY(768) - 200程度 = 空域の下限
+            const spawnY   = skyTopY + Math.random() * (skyBotY - skyTopY);
+
+            // 左右どちらかの画面外からスポーン
+            const goRight = Math.random() < 0.5;
+            const margin  = 120;
+            const spawnX  = goRight ? camL - margin : camR + margin;
+
+            // 速度・見た目のランダム化
+            const speed = SKY_ALIEN_MIN_SPEED + Math.random() * (SKY_ALIEN_MAX_SPEED - SKY_ALIEN_MIN_SPEED);
+            const vx    = goRight ? speed : -speed;
+            const sc    = SKY_ALIEN_MIN_SCALE + Math.random() * (SKY_ALIEN_MAX_SCALE - SKY_ALIEN_MIN_SCALE);
+            const alpha = SKY_ALIEN_MIN_ALPHA + Math.random() * (SKY_ALIEN_MAX_ALPHA - SKY_ALIEN_MIN_ALPHA);
+
+            // scene.add.sprite（物理なし・背景扱い）
+            const sa = scene.add.sprite(spawnX, spawnY, 'alien', 0);
+            sa.setScale(sc);
+            sa.setAlpha(alpha);
+            sa.setDepth(0.5);  // 空背景より前、地面ブロックより後ろ
+            sa.setFlipX(!goRight);
+            sa.anims.play('alien_float', true);
+
+            const colorEntry = pickAlienColor();
+            sa.setTint(colorEntry.color);
+
+            skyAliens.push({
+                sprite:   sa,
+                vx:       vx,
+                bobPhase: Math.random() * Math.PI * 2,
+                bobTime:  0
+            });
+        }
+
+        function updateSkyAliens(scene, time, delta) {
+            trySpawnSkyAlien(scene, time);
+
+            const cam    = scene.cameras.main;
+            const camL   = cam.scrollX;
+            const camR   = camL + cam.width;
+            const margin = 180;
+
+            for (let i = skyAliens.length - 1; i >= 0; i--) {
+                const sa = skyAliens[i];
+                if (!sa.sprite || !sa.sprite.active) { skyAliens.splice(i, 1); continue; }
+
+                sa.bobTime += delta;
+                // 横移動＋緩やかな上下揺れ
+                sa.sprite.x += sa.vx * delta / 1000;
+                sa.sprite.y += Math.sin(sa.bobTime * 0.0008 + sa.bobPhase) * 0.25;
+
+                // 画面外に十分出たら消去
+                if (sa.sprite.x < camL - margin || sa.sprite.x > camR + margin) {
+                    sa.sprite.destroy();
+                    skyAliens.splice(i, 1);
+                }
+            }
         }
 
         function openCustomerBuyPanel(scene, customer) {
@@ -7775,6 +8354,49 @@
                 if (onGround) animName = 'idle';
             }
 
+            // ===== 1ブロック自動ステップアップ =====
+            // 地上で進行方向に1段の壁があるとき、ジャンプなしで乗り越える
+            if (onGround && !onVine && !inWater && player.body.velocity.y >= -10) {
+                const bs = BLOCK_SIZE;
+                const halfW = 14;
+                const mvRstep = cursors.right.isDown || wasdKeys.d.isDown || isRightPressed;
+                const mvLstep = cursors.left.isDown  || wasdKeys.a.isDown || isLeftPressed;
+                const blockedR = mvRstep && player.body.blocked.right;
+                const blockedL = mvLstep && player.body.blocked.left;
+
+                if (blockedR || blockedL) {
+                    const dir = blockedR ? 1 : -1;
+                    const footY = player.y + 24;
+                    // 進行方向の壁ブロック検出座標（ブロックグリッドに丸める）
+                    // 壁ブロックは「足元の1段上」にある（下端がプレイヤーの足に合わさる）ため footY - bs*0.5 で検出
+                    const wallX = Math.round((player.x + dir * (halfW + bs * 0.5)) / bs) * bs;
+                    const wallY = Math.round((footY - bs * 0.5) / bs) * bs;
+
+                    const wallBlock = bkGetAt(wallX, wallY);
+                    if (wallBlock) {
+                        const wTid = wallBlock.getData('typeId');
+                        const wSolid = !FURNITURE_BG_TYPES.has(wTid)
+                                    && wTid !== BLOCK_TYPES.VINE
+                                    && wTid !== BLOCK_TYPES.WATER
+                                    && wTid !== BLOCK_TYPES.LADDER;
+                        if (wSolid) {
+                            // 壁の1段上と、プレイヤー頭上が空いているか確認
+                            const aboveBlock = bkGetAt(wallX, wallY - bs);
+                            const headBlock1 = bkGetAt(player.x, player.y - bs);
+                            const headBlock2 = bkGetAt(player.x, player.y);
+                            const isClear = (b) => !b || FURNITURE_BG_TYPES.has(b.getData('typeId'));
+                            if (isClear(aboveBlock) && isClear(headBlock1) && isClear(headBlock2)) {
+                                // 1ブロック上にステップアップ
+                                player.y -= bs;
+                                player.body.position.y -= bs;
+                                player.body.updateCenter();
+                                player.setVelocityY(0);
+                            }
+                        }
+                    }
+                }
+            }
+
             // ===== 階段スロープ補正 =====
             // stairBlocks（物理なし）上を歩くとき、プレイヤーY座標をスロープ面に連続補正する
             // 階段ブロック自体は body.enable=false で vinePassthrough がスキップするため衝突しない
@@ -8135,7 +8757,7 @@
                             const dist2 = Math.abs(rb.x - tx);
                             if (dist2 > 24) {
                                 const dir = tx > rb.x ? 1 : -1;
-                                rb.setVelocityX(dir * 60);
+                                rb.setVelocityX(dir * RABBIT_SHOPKEEPER_SPEED);
                                 rb.setFlipX(dir < 0);
                                 rb.anims.play('rabbit_walk', true);
                                 if (rb.body.touching.down && (rb.body.blocked.left || rb.body.blocked.right)) {
@@ -8153,9 +8775,9 @@
                     }
 
                     // === 通常ペット: プレイヤーについていく ===
-                    if (distToPlayer > 60) {
+                    if (distToPlayer > RABBIT_PET_IDLE_RANGE) {
                         const followDir = player.x > rb.x ? 1 : -1;
-                        const followSpeed = distToPlayer > 200 ? 200 : 100;
+                        const followSpeed = distToPlayer > RABBIT_PET_FOLLOW_THRESHOLD ? RABBIT_PET_FOLLOW_SPEED_FAR : RABBIT_PET_FOLLOW_SPEED;
                         rb.setVelocityX(followDir * followSpeed);
                         rb.setFlipX(followDir < 0);
                         rb.anims.play('rabbit_walk', true);
@@ -8164,7 +8786,7 @@
                             rb.setVelocityY(-420);
                         }
                         // 離れすぎたらテレポート
-                        if (distToPlayer > 400) {
+                        if (distToPlayer > RABBIT_PET_TELEPORT_RANGE) {
                             rb.setPosition(player.x + (Math.random() < 0.5 ? -40 : 40), player.y - 20);
                         }
                     } else {
@@ -8175,10 +8797,10 @@
                 }
 
                 // === りんごを持っている → 近寄ってくる ===
-                if (holdingApple && distToPlayer < 200) {
+                if (holdingApple && distToPlayer < RABBIT_APPROACH_RANGE) {
                     if (distToPlayer > 40) {
                         const approachDir = player.x > rb.x ? 1 : -1;
-                        rb.setVelocityX(approachDir * 40);
+                        rb.setVelocityX(approachDir * RABBIT_APPROACH_SPEED);
                         rb.setFlipX(approachDir < 0);
                         rb.anims.play('rabbit_walk', true);
                     } else {
@@ -8204,11 +8826,11 @@
                     }
                 }
                 // プレイヤーが近づくと逃げる（りんご無し）
-                if (distToPlayer < 120) {
+                if (distToPlayer < RABBIT_FLEE_RANGE) {
                     const fleeDir = rb.x < player.x ? -1 : 1;
                     rb.setData('dir', fleeDir);
                     rb.setData('paused', false);
-                    rb.setVelocityX(fleeDir * 120);
+                    rb.setVelocityX(fleeDir * RABBIT_FLEE_SPEED);
                     rb.setFlipX(fleeDir < 0);
                     rb.anims.play('rabbit_walk', true);
                     if (rb.body.touching.down && Math.random() < 0.03) {
@@ -8225,7 +8847,7 @@
                         rb.anims.play('rabbit_idle', true);
                         continue;
                     }
-                    rb.setVelocityX(dir * 50);
+                    rb.setVelocityX(dir * RABBIT_WALK_SPEED);
                     rb.setFlipX(dir < 0);
                     rb.anims.play('rabbit_walk', true);
                     if (rb.body.touching.left || rb.body.touching.right || rb.body.blocked.left || rb.body.blocked.right) {
@@ -8270,22 +8892,22 @@
                     if (nearestSlime) {
                         // スライムに向かって突進（updateSlimes側で攻撃判定を処理）
                         const atkDir = nearestSlime.x > dg.x ? 1 : -1;
-                        dg.setVelocityX(atkDir * 250);
+                        dg.setVelocityX(atkDir * DOG_ATTACK_SPEED);
                         dg.setFlipX(atkDir < 0);
                         dg.anims.play('dog_walk', true);
                         if (dg.body.touching.down && (dg.body.blocked.left || dg.body.blocked.right)) {
                             dg.setVelocityY(-420);
                         }
-                    } else if (distToPlayer > 50) {
+                    } else if (distToPlayer > DOG_PET_IDLE_RANGE) {
                         const followDir = player.x > dg.x ? 1 : -1;
-                        const followSpeed = distToPlayer > 180 ? 220 : 110;
+                        const followSpeed = distToPlayer > DOG_PET_FOLLOW_THRESHOLD ? DOG_PET_FOLLOW_SPEED_FAR : DOG_PET_FOLLOW_SPEED;
                         dg.setVelocityX(followDir * followSpeed);
                         dg.setFlipX(followDir < 0);
                         dg.anims.play('dog_walk', true);
                         if (dg.body.touching.down && (dg.body.touching.left || dg.body.touching.right || dg.body.blocked.left || dg.body.blocked.right)) {
                             dg.setVelocityY(-420);
                         }
-                        if (distToPlayer > 400) {
+                        if (distToPlayer > DOG_PET_TELEPORT_RANGE) {
                             dg.setPosition(player.x + (Math.random() < 0.5 ? -40 : 40), player.y - 20);
                         }
                     } else {
@@ -8296,10 +8918,10 @@
                 }
 
                 // === 骨を持っている → 近寄ってくる ===
-                if (holdingBone && distToPlayer < 200) {
+                if (holdingBone && distToPlayer < DOG_APPROACH_RANGE) {
                     if (distToPlayer > 35) {
                         const approachDir = player.x > dg.x ? 1 : -1;
-                        dg.setVelocityX(approachDir * 50);
+                        dg.setVelocityX(approachDir * DOG_APPROACH_SPEED);
                         dg.setFlipX(approachDir < 0);
                         dg.anims.play('dog_walk', true);
                     } else {
@@ -8334,7 +8956,7 @@
                         dg.anims.play('dog_idle', true);
                         continue;
                     }
-                    dg.setVelocityX(dir * 40);
+                    dg.setVelocityX(dir * DOG_WALK_SPEED);
                     dg.setFlipX(dir < 0);
                     dg.anims.play('dog_walk', true);
                     if (dg.body.touching.left || dg.body.touching.right || dg.body.blocked.left || dg.body.blocked.right) {
@@ -8422,6 +9044,10 @@
 
             // 客NPC更新
             updateCustomers(this, delta);
+            // 上空を飛ぶ背景宇宙人更新
+            updateSkyAliens(this, time, delta);
+            // ニワトリ更新
+            updateChickens(this, delta);
 
             // === レンジNPC更新 ===
             if (renji && renji.active) {
@@ -9875,6 +10501,10 @@
                             newBlock.refreshBody();
                             newBlock.setData('typeId', activeItem.type);
                             newBlock.setData('hp', bData.hp);
+                            // 家具系ブロックは衝突なし・後ろレイヤー
+                            if (FURNITURE_BG_TYPES.has(activeItem.type)) {
+                                applyFurnitureStyle(newBlock);
+                            }
                             // 蔦の場合はvineBlocksに登録
                             if (activeItem.type === BLOCK_TYPES.VINE) {
                                 newBlock.setAlpha(0.85);
@@ -9938,6 +10568,7 @@
                                 rightBlock.refreshBody();
                                 rightBlock.setData('typeId', BLOCK_TYPES.STRAW_BED_R);
                                 rightBlock.setData('hp', bedR.hp);
+                                applyFurnitureStyle(rightBlock); // 右半分も背景レイヤーに
                                 // 左右ペアを相互参照
                                 newBlock.setData('bedPair', rightBlock);
                                 rightBlock.setData('bedPair', newBlock);
@@ -9962,6 +10593,7 @@
                                 rightBlock.refreshBody();
                                 rightBlock.setData('typeId', BLOCK_TYPES.TABLE_R);
                                 rightBlock.setData('hp', tblR.hp);
+                                applyFurnitureStyle(rightBlock); // 右半分も背景レイヤーに
                                 // 左右ペアを相互参照
                                 newBlock.setData('tablePair', rightBlock);
                                 rightBlock.setData('tablePair', newBlock);
