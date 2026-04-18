@@ -598,6 +598,25 @@
         let encounteredItems = new Set();     // 入手済みアイテムtypeのセット
         let _itemUnlockQueue = [];            // 初入手アイテムキュー（{type}）
 
+        // === 実績システム ===
+        let gameStats = {
+            maxDepthM:    0,      // 最大深度（M）
+            blocksMined:  0,      // 掘ったブロック数
+            blocksPlaced: 0,      // 設置したブロック数
+            slimesKilled: 0,      // スライム撃破数
+            foodEaten:    0,      // 食べ物を食べた回数
+            totalEarned:  0,      // 累計獲得コイン
+            craftCount:   0,      // クラフト回数
+            rabbitTamed:  false,  // うさぎ仲間化
+            dogTamed:     false,  // 犬仲間化
+            chickenTamed: false   // ニワトリ仲間化
+        };
+        let unlockedAchievements = new Set();
+        let _achievementCheckTimer = 0;
+        const ACHIEVEMENT_CHECK_INTERVAL = 1200;
+        let achievementsOverlay = null;
+        let isAchievementsOpen = false;
+
         let petListOverlay = null;
         let isPetListOpen = false;
 
@@ -1877,6 +1896,12 @@
                             encounteredItems.add(bag[i].type);
                     }
                 }
+                if (_saveData.gameStats) {
+                    Object.assign(gameStats, _saveData.gameStats);
+                }
+                if (_saveData.unlockedAchievements) {
+                    unlockedAchievements = new Set(_saveData.unlockedAchievements);
+                }
             } else {
                 // 地下グリッドサイズ
                 const cols = Math.floor(worldWidth / blockSize);
@@ -3111,6 +3136,8 @@
             menuButton = scene.add.image(0, 0, 'button').setInteractive({ useHandCursor: true }).setScrollFactor(0).setDepth(100);
             menuButtonText = scene.add.text(0, 0, '≡', { fontSize: '32px', color: '#fff', fontStyle: 'bold' }).setOrigin(0.5).setScrollFactor(0).setDepth(101);
             createMenuPanel(scene);
+            // 初期位置: 右上（リサイズイベントで正確に再配置される）
+            menuPanel.setPosition(scene.scale.width - 4, 200);
             const _toggleMenu = () => {
                 playSE('ui_click');
                 isMenuOpen = !isMenuOpen;
@@ -4124,6 +4151,7 @@
             const _rDData = DECO_DEFS[recipe.resultId];
             const resultTexture = _rBData ? _rBData.texture : (_rWData ? _rWData.texture : (_rDData ? _rDData.texture : 'tileset'));
             const resultFrame   = _rBData ? _rBData.frame   : undefined;
+            gameStats.craftCount++;
             addInventoryItem(recipe.resultId, recipe.resultCount, resultTexture, resultFrame);
             updateInventoryUI();
         }
@@ -4208,6 +4236,234 @@
             { name: 'その他', color: 0xaaaaaa,
               types: new Set([BLOCK_TYPES.GRASS, BLOCK_TYPES.LEAF, BLOCK_TYPES.IRON, BLOCK_TYPES.GOLD, BLOCK_TYPES.RUBY, BLOCK_TYPES.CHEST, BLOCK_TYPES.SAPLING, BLOCK_TYPES.WEED, BLOCK_TYPES.FLOWER, BLOCK_TYPES.WATER]) }
         ];
+
+        // =====================================================
+        // === 実績定義 ===
+        // =====================================================
+        const ACHIEVEMENTS = [
+            // 探索
+            { id:'explore_20m',  cat:'探索', icon:'🌿', title:'地下探検',       desc:'地下20Mまで潜った',           condition:()=> gameStats.maxDepthM >= 20  },
+            { id:'explore_50m',  cat:'探索', icon:'⛰',  title:'洞窟探検家',     desc:'地下50Mまで潜った',           condition:()=> gameStats.maxDepthM >= 50  },
+            { id:'explore_100m', cat:'探索', icon:'🌑', title:'地底人',         desc:'地下100Mまで潜った',          condition:()=> gameStats.maxDepthM >= 100 },
+            { id:'explore_150m', cat:'探索', icon:'💎', title:'大深度探索',     desc:'地下150Mまで潜った',          condition:()=> gameStats.maxDepthM >= 150 },
+            // 採掘
+            { id:'mine_10',   cat:'採掘', icon:'⛏',  title:'採掘デビュー',   desc:'ブロックを10個掘った',         condition:()=> gameStats.blocksMined >= 10  },
+            { id:'mine_100',  cat:'採掘', icon:'⛏',  title:'採掘者',         desc:'ブロックを100個掘った',        condition:()=> gameStats.blocksMined >= 100 },
+            { id:'mine_500',  cat:'採掘', icon:'⛏',  title:'採掘王',         desc:'ブロックを500個掘った',        condition:()=> gameStats.blocksMined >= 500 },
+            { id:'mine_iron', cat:'採掘', icon:'🔩', title:'鉄の時代',       desc:'鉄鉱石を手に入れた',           condition:()=> encounteredItems.has(BLOCK_TYPES.IRON)  },
+            { id:'mine_gold', cat:'採掘', icon:'🌟', title:'黄金の輝き',     desc:'金塊を手に入れた',             condition:()=> encounteredItems.has(BLOCK_TYPES.GOLD)  },
+            { id:'mine_ruby', cat:'採掘', icon:'❤',  title:'赤い宝石',       desc:'ルビーを手に入れた',           condition:()=> encounteredItems.has(BLOCK_TYPES.RUBY)  },
+            // 建築
+            { id:'place_10',  cat:'建築', icon:'🏗',  title:'建築デビュー',   desc:'ブロックを10個設置した',       condition:()=> gameStats.blocksPlaced >= 10  },
+            { id:'place_100', cat:'建築', icon:'🏠', title:'家づくり',       desc:'ブロックを100個設置した',      condition:()=> gameStats.blocksPlaced >= 100 },
+            { id:'craft_1',   cat:'建築', icon:'⚒',  title:'はじめての作業', desc:'アイテムを1回クラフトした',    condition:()=> gameStats.craftCount >= 1  },
+            { id:'craft_10',  cat:'建築', icon:'⚒',  title:'職人',           desc:'アイテムを10回クラフトした',   condition:()=> gameStats.craftCount >= 10 },
+            // 図鑑
+            { id:'enc_item_10', cat:'図鑑', icon:'📖', title:'コレクター',     desc:'アイテム図鑑を10種解放した',   condition:()=> encounteredItems.size >= 10 },
+            { id:'enc_item_30', cat:'図鑑', icon:'📚', title:'アイテム博士',   desc:'アイテム図鑑を30種解放した',   condition:()=> encounteredItems.size >= 30 },
+            { id:'enc_cre_5',   cat:'図鑑', icon:'🌿', title:'観察者',         desc:'生き物図鑑を5種解放した',      condition:()=> encounteredCreatures.size >= 5  },
+            { id:'enc_cre_15',  cat:'図鑑', icon:'🐾', title:'生き物博士',     desc:'生き物図鑑を15種解放した',     condition:()=> encounteredCreatures.size >= 15 },
+            // 生活
+            { id:'money_100',  cat:'生活', icon:'💰', title:'商売人',         desc:'累計100コイン稼いだ',          condition:()=> gameStats.totalEarned >= 100  },
+            { id:'money_1000', cat:'生活', icon:'💰', title:'豪商',           desc:'累計1000コイン稼いだ',         condition:()=> gameStats.totalEarned >= 1000 },
+            { id:'food_1',     cat:'生活', icon:'🍎', title:'いただきます',   desc:'食べ物を食べた',               condition:()=> gameStats.foodEaten >= 1  },
+            { id:'food_10',    cat:'生活', icon:'🍞', title:'大食い',         desc:'食べ物を10回食べた',           condition:()=> gameStats.foodEaten >= 10 },
+            // ペット・戦闘
+            { id:'pet_rabbit',  cat:'ペット', icon:'🐰', title:'うさぎ使い',     desc:'うさぎを仲間にした',           condition:()=> gameStats.rabbitTamed  },
+            { id:'pet_dog',     cat:'ペット', icon:'🐶', title:'いぬ使い',       desc:'犬を仲間にした',               condition:()=> gameStats.dogTamed     },
+            { id:'pet_chicken', cat:'ペット', icon:'🐔', title:'にわとり使い',   desc:'ニワトリを仲間にした',         condition:()=> gameStats.chickenTamed },
+            { id:'slime_1',     cat:'ペット', icon:'💚', title:'スライム退治',   desc:'スライムを倒した',             condition:()=> gameStats.slimesKilled >= 1  },
+            { id:'slime_10',    cat:'ペット', icon:'⚔',  title:'スライムハンター',desc:'スライムを10体倒した',       condition:()=> gameStats.slimesKilled >= 10 },
+        ];
+        const ACHIEVEMENT_CATS = ['探索', '採掘', '建築', '図鑑', '生活', 'ペット'];
+
+        function checkAchievements(scene) {
+            for (const ach of ACHIEVEMENTS) {
+                if (unlockedAchievements.has(ach.id)) continue;
+                try {
+                    if (ach.condition()) {
+                        unlockedAchievements.add(ach.id);
+                        _encounterPopupQueue.push({
+                            texture: null, frame: 0, tint: null,
+                            icon: ach.icon, name: ach.title,
+                            label: '🏆 実績解放！'
+                        });
+                        _flushEncounterPopup(scene);
+                    }
+                } catch(e) {}
+            }
+        }
+
+        // =====================================================
+        // === 実績画面 ===
+        // =====================================================
+        function openAchievementsScreen(scene) {
+            if (achievementsOverlay) return;
+            isAchievementsOpen = true;
+            isMenuOpen = false;
+            menuPanel.setVisible(false);
+
+            achievementsOverlay = scene.add.container(0, 0).setScrollFactor(0).setDepth(500);
+
+            const sw = scene.scale.width, sh = scene.scale.height;
+            const dimBg = scene.add.rectangle(sw/2, sh/2, sw, sh, 0x000000, 0.82)
+                .setScrollFactor(0).setInteractive();
+            achievementsOverlay.add(dimBg);
+
+            const panelW = Math.min(460, sw - 20);
+            const panelH = Math.min(sh - 40, 560);
+            const panelX = sw / 2, panelY = sh / 2;
+
+            achievementsOverlay.add(
+                scene.add.rectangle(panelX, panelY, panelW, panelH, 0x1a1408, 0.96)
+                    .setScrollFactor(0).setStrokeStyle(2, 0xccaa33)
+            );
+
+            const unlockedCount = unlockedAchievements.size;
+            const totalCount    = ACHIEVEMENTS.length;
+            achievementsOverlay.add(
+                scene.add.text(panelX, panelY - panelH/2 + 20,
+                    '🏆 実績  ' + unlockedCount + ' / ' + totalCount,
+                    { fontSize: '19px', color: '#ffdd88', fontStyle: 'bold' }
+                ).setOrigin(0.5).setScrollFactor(0)
+            );
+
+            const closeBtn = scene.add.text(panelX + panelW/2 - 16, panelY - panelH/2 + 8, '✕',
+                { fontSize: '22px', color: '#ff6666', fontStyle: 'bold' }
+            ).setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            closeBtn.on('pointerdown', () => closeAchievementsScreen());
+            achievementsOverlay.add(closeBtn);
+
+            // タブ（カテゴリ）
+            const tabY    = panelY - panelH/2 + 46;
+            const tabCount= ACHIEVEMENT_CATS.length;
+            const tabW    = Math.floor((panelW - 20) / tabCount);
+            const tabH    = 24;
+            const tabStartX = panelX - panelW/2 + 10;
+            let tabBgs = [], tabTxts = [], activeTab = 0;
+
+            // コンテンツエリア
+            const contentTop    = tabY + tabH/2 + 8;
+            const contentBottom = panelY + panelH/2 - 10;
+            const contentH      = contentBottom - contentTop;
+            const listLeft      = panelX - panelW/2 + 14;
+            const rowH          = 58;
+
+            const maskShape = scene.make.graphics().setScrollFactor(0);
+            maskShape.fillRect(panelX - panelW/2, contentTop, panelW, contentH);
+            const mask = maskShape.createGeometryMask();
+
+            let listContainer = scene.add.container(0, 0).setScrollFactor(0);
+            listContainer.setMask(mask);
+            achievementsOverlay.add(listContainer);
+
+            let scrollY = 0, maxScroll = 0;
+
+            function renderList(catIdx) {
+                listContainer.removeAll(true);
+                scrollY = 0; listContainer.setY(0);
+
+                const entries = ACHIEVEMENTS.filter(a => a.cat === ACHIEVEMENT_CATS[catIdx]);
+                for (let i = 0; i < entries.length; i++) {
+                    const ach   = entries[i];
+                    const known = unlockedAchievements.has(ach.id);
+                    const yPos  = contentTop + i * rowH;
+
+                    // カード背景
+                    const cardBg = scene.add.rectangle(
+                        panelX, yPos + rowH/2 - 2, panelW - 20, rowH - 4,
+                        known ? 0x2a2000 : 0x111108, known ? 0.9 : 0.7
+                    ).setScrollFactor(0).setStrokeStyle(1, known ? 0xbbaa22 : 0x333310);
+                    listContainer.add(cardBg);
+
+                    // アイコン
+                    const iconTxt = scene.add.text(listLeft + 18, yPos + rowH/2 - 2,
+                        known ? ach.icon : '🔒',
+                        { fontSize: '22px' }
+                    ).setOrigin(0.5).setScrollFactor(0);
+                    listContainer.add(iconTxt);
+
+                    // タイトル
+                    const titleTxt = scene.add.text(listLeft + 40, yPos + 6,
+                        known ? ach.title : '???',
+                        { fontSize: '14px', color: known ? '#ffdd88' : '#555540', fontStyle: 'bold' }
+                    ).setScrollFactor(0);
+                    listContainer.add(titleTxt);
+
+                    // 説明
+                    const descTxt = scene.add.text(listLeft + 40, yPos + 26,
+                        known ? ach.desc : 'まだ解放されていません',
+                        { fontSize: '11px', color: known ? '#ccaa66' : '#333328',
+                          wordWrap: { width: panelW - 76, useAdvancedWrap: true } }
+                    ).setScrollFactor(0);
+                    listContainer.add(descTxt);
+                }
+                maxScroll = Math.max(0, entries.length * rowH - contentH);
+            }
+
+            for (let t = 0; t < tabCount; t++) {
+                const tx = tabStartX + t * tabW + tabW/2;
+                const tBg = scene.add.rectangle(tx, tabY, tabW - 4, tabH, 0x222208, 0.8)
+                    .setScrollFactor(0).setInteractive({ useHandCursor: true }).setStrokeStyle(1, 0x444420);
+                const tTxt = scene.add.text(tx, tabY, ACHIEVEMENT_CATS[t],
+                    { fontSize: '11px', color: '#aa9955', fontStyle: 'bold' }
+                ).setOrigin(0.5).setScrollFactor(0);
+                tBg.on('pointerdown', () => {
+                    if (activeTab === t) return;
+                    playSE('ui_click');
+                    activeTab = t; updateTabVisuals(); renderList(t);
+                });
+                achievementsOverlay.add(tBg); achievementsOverlay.add(tTxt);
+                tabBgs.push(tBg); tabTxts.push(tTxt);
+            }
+
+            function updateTabVisuals() {
+                for (let t = 0; t < tabCount; t++) {
+                    if (t === activeTab) {
+                        tabBgs[t].setFillStyle(0x443300, 1).setStrokeStyle(2, 0xccaa33);
+                        tabTxts[t].setColor('#ffdd88');
+                    } else {
+                        tabBgs[t].setFillStyle(0x222208, 0.8).setStrokeStyle(1, 0x444420);
+                        tabTxts[t].setColor('#aa9955');
+                    }
+                }
+            }
+            updateTabVisuals(); renderList(0);
+
+            const doScroll = (dy) => {
+                scrollY = Phaser.Math.Clamp(scrollY + dy, 0, maxScroll);
+                listContainer.setY(-scrollY);
+            };
+            const wheelHandler = (p, go, dx, dy) => { if (isAchievementsOpen) doScroll(dy > 0 ? 50 : -50); };
+            scene.input.on('wheel', wheelHandler);
+
+            let dragStartY = 0, dragScrollStart = 0, isDragging = false;
+            dimBg.on('pointerdown', (p) => { dragStartY = p.y; dragScrollStart = scrollY; isDragging = false; });
+            dimBg.on('pointermove', (p) => {
+                if (!p.isDown) return;
+                const delta = dragStartY - p.y;
+                if (Math.abs(delta) > 6) isDragging = true;
+                if (isDragging) { scrollY = Phaser.Math.Clamp(dragScrollStart + delta, 0, maxScroll); listContainer.setY(-scrollY); }
+            });
+            dimBg.on('pointerup', () => { isDragging = false; });
+
+            achievementsOverlay.setData('wheelHandler', wheelHandler);
+            achievementsOverlay.setData('maskShape', maskShape);
+            achievementsOverlay.setData('scene', scene);
+            if (uiCamera) assignCameraFilters(scene);
+        }
+
+        function closeAchievementsScreen() {
+            if (!achievementsOverlay) return;
+            const _scene = achievementsOverlay.getData('scene');
+            const wh = achievementsOverlay.getData('wheelHandler');
+            if (_scene && wh) _scene.input.off('wheel', wh);
+            const ms = achievementsOverlay.getData('maskShape');
+            if (ms) ms.destroy();
+            achievementsOverlay.destroy();
+            achievementsOverlay = null;
+            isAchievementsOpen = false;
+        }
 
         function openEncyclopedia(scene) {
             if (encyclopediaOverlay) return;
@@ -4729,10 +4985,16 @@
             }).setOrigin(0.5, 0);
             container.add(starLabel);
 
-            const icon = scene.add.image(-popW / 2 + 26, 10, entry.texture, entry.frame)
-                .setDisplaySize(38, 38);
-            if (entry.tint != null) icon.setTint(entry.tint);
-            container.add(icon);
+            if (entry.texture) {
+                const icon = scene.add.image(-popW / 2 + 26, 10, entry.texture, entry.frame)
+                    .setDisplaySize(38, 38);
+                if (entry.tint != null) icon.setTint(entry.tint);
+                container.add(icon);
+            } else if (entry.icon) {
+                const iconText = scene.add.text(-popW / 2 + 26, 10, entry.icon, { fontSize: '28px' })
+                    .setOrigin(0.5);
+                container.add(iconText);
+            }
 
             const nameText = scene.add.text(-popW / 2 + 52, -2, entry.name, {
                 fontSize: '13px', color: '#ffffff', fontStyle: 'bold',
@@ -5285,152 +5547,208 @@
         function createMenuPanel(scene) {
             menuPanel = scene.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false);
 
-            // パネル背景
-            const panelW = 220;
-            const panelH = 540;
-            const bg = scene.add.rectangle(0, 0, panelW, panelH, 0x000000, 0.85)
-                .setOrigin(1, 0).setScrollFactor(0).setInteractive();
-            const title = scene.add.text(-panelW + 15, 12, 'MENU', {
-                fontSize: '18px', color: '#fff', fontStyle: 'bold'
-            }).setScrollFactor(0);
-            menuPanel.add([bg, title]);
+            // ===== スマホ風アプリランチャー（右上固定・暗幕なし）=====
+            // アイコン定義（3列×3行）
+            const MENU_ITEMS = [
+                { icon: '⚒',  label: 'クラフト',    color: 0x7a4010, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    isCraftPanelOpen = !isCraftPanelOpen;
+                    craftPanel.setX(isCraftPanelOpen ? scene.scale.width : scene.scale.width + 250);
+                }},
+                { icon: '💾',  label: 'セーブ',      color: 0x165c28, isSave: true },
+                { icon: '🗑',  label: 'データ削除',  color: 0x6a1010, isDel: true },
+                { icon: '📖',  label: 'アイテム図鑑', color: 0x10206a, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openEncyclopedia(scene);
+                }},
+                { icon: '🐾',  label: '生き物図鑑',  color: 0x104a1a, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openCreatureBook(scene);
+                }},
+                { icon: '🐕',  label: 'ペット',      color: 0x3a1060, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openPetList(scene);
+                }},
+                { icon: '🏠',  label: '自宅へ帰る',  color: 0x124a12, action: () => {
+                    playSE('ui_success');
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    if (homePosition) player.setPosition(homePosition.x, homePosition.y);
+                    else player.setPosition(3000, 668);
+                    player.setVelocity(0, 0);
+                }},
+                { icon: '❓',  label: '操作方法',    color: 0x2a2a2a, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openHelpScreen(scene);
+                }},
+                { icon: '🏆',  label: '実績',        color: 0x4a2800, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openAchievementsScreen(scene);
+                }},
+            ];
 
-            // --- クラフトボタン（最上部）---
-            const craftBtnBg = scene.add.rectangle(-panelW / 2, 60, panelW - 30, 44, 0x664422)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const craftBtnText = scene.add.text(-panelW / 2, 60, '⚒ クラフト', {
-                fontSize: '16px', color: '#ffddaa', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            craftBtnBg.on('pointerdown', () => {
-                playSE('ui_click');
-                isMenuOpen = false;
-                menuPanel.setVisible(false);
-                isCraftPanelOpen = !isCraftPanelOpen;
-                craftPanel.setX(isCraftPanelOpen ? scene.scale.width : scene.scale.width + 250);
-            });
-            craftBtnText.on('pointerdown', () => craftBtnBg.emit('pointerdown'));
-            menuPanel.add([craftBtnBg, craftBtnText]);
+            // レイアウト定数
+            const COLS   = 3;
+            const iSz    = 64;   // アイコンサイズ
+            const iR     = 14;   // 角丸半径
+            const colGap = 12;
+            const rowGap = 6;
+            const labelH = 22;
+            const cellW  = iSz + colGap;
+            const cellH  = iSz + labelH + rowGap;
+            const rows   = Math.ceil(MENU_ITEMS.length / COLS);
+            const gridW  = COLS * cellW - colGap;
+            const gridH  = rows  * cellH - rowGap;
+            const padX   = 14;
+            const padTop = 40;
+            const padBot = 12;
+            const panelW = gridW + padX * 2;   // ≈ 260
+            const panelH = gridH + padTop + padBot;
 
-            // --- セーブボタン ---
-            const saveBtnBg = scene.add.rectangle(-panelW / 2, 120, panelW - 30, 44, 0x336633)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const saveBtnText = scene.add.text(-panelW / 2, 120, 'SAVE', {
-                fontSize: '18px', color: '#fff', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            saveBtnBg.on('pointerdown', () => {
-                playSE('ui_success');
-                saveGame(scene);
-                saveBtnBg.setFillStyle(0x00ff00);
-                scene.time.delayedCall(200, () => saveBtnBg.setFillStyle(0x336633));
-            });
-            saveBtnText.on('pointerdown', () => saveBtnBg.emit('pointerdown'));
-            menuPanel.add([saveBtnBg, saveBtnText]);
+            // コンテナは右上の1点に配置される（resize時に更新）
+            // パネルはその点から左・下方向に伸びる（x=0が右端）
 
-            // --- データ削除ボタン ---
-            const delBtnBg = scene.add.rectangle(-panelW / 2, 180, panelW - 30, 44, 0x663333)
+            // パネル背景（右上基点で左・下へ描画）
+            const panelGfx = scene.add.graphics().setScrollFactor(0);
+            const drawPanel = () => {
+                panelGfx.clear();
+                // ドロップシャドウ
+                panelGfx.fillStyle(0x000000, 0.35);
+                panelGfx.fillRoundedRect(-panelW + 3, 3, panelW, panelH, 16);
+                // 本体
+                panelGfx.fillStyle(0x111820, 0.96);
+                panelGfx.fillRoundedRect(-panelW, 0, panelW, panelH, 16);
+                // 上部ハイライト帯
+                panelGfx.fillStyle(0x2244aa, 0.14);
+                panelGfx.fillRoundedRect(-panelW, 0, panelW, padTop, { tl:16, tr:16, bl:0, br:0 });
+                // 外枠
+                panelGfx.lineStyle(1.5, 0x3366cc, 0.65);
+                panelGfx.strokeRoundedRect(-panelW, 0, panelW, panelH, 16);
+            };
+            drawPanel();
+            // クリック貫通防止
+            panelGfx.setInteractive(
+                new Phaser.Geom.Rectangle(-panelW, 0, panelW, panelH),
+                Phaser.Geom.Rectangle.Contains
+            );
+            panelGfx.on('pointerdown', () => {});
+            menuPanel.add(panelGfx);
+
+            // タイトル「MENU」（パネル内左寄り）
+            const titleText = scene.add.text(-panelW / 2, 13, 'MENU', {
+                fontSize: '15px', color: '#889abb', fontStyle: 'bold', letterSpacing: 3
+            }).setOrigin(0.5, 0).setScrollFactor(0);
+            menuPanel.add(titleText);
+
+            // 閉じる ✕ ボタン（パネル右上）
+            const closeHit = scene.add.rectangle(-10, 13, 28, 28, 0x000000, 0)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const delBtnText = scene.add.text(-panelW / 2, 180, 'DELETE SAVE', {
-                fontSize: '16px', color: '#ff8888', fontStyle: 'bold'
+            const closeText = scene.add.text(-10, 13, '✕', {
+                fontSize: '15px', color: '#667799'
             }).setOrigin(0.5).setScrollFactor(0);
+            closeHit.on('pointerdown', () => { isMenuOpen = false; menuPanel.setVisible(false); });
+            closeHit.on('pointerover', () => closeText.setColor('#aaccff'));
+            closeHit.on('pointerout',  () => closeText.setColor('#667799'));
+            menuPanel.add([closeHit, closeText]);
+
+            // セパレータ
+            const sep = scene.add.graphics().setScrollFactor(0);
+            sep.lineStyle(1, 0x334466, 0.6);
+            sep.lineBetween(-panelW + 14, padTop - 2, -8, padTop - 2);
+            menuPanel.add(sep);
+
+            // ===== アイコングリッド =====
+            // 左端アイコン中心 x: -panelW + padX + iSz/2
+            const gridStartX = -panelW + padX + iSz / 2;
+            const gridStartY = padTop + iSz / 2;
 
             let deleteConfirm = false;
-            delBtnBg.on('pointerdown', () => {
-                if (!deleteConfirm) {
-                    // 1回目: 確認表示
-                    playSE('ui_error');
-                    deleteConfirm = true;
-                    delBtnText.setText('CONFIRM?');
-                    delBtnBg.setFillStyle(0xaa2222);
-                    // 3秒後にリセット
-                    scene.time.delayedCall(3000, () => {
-                        deleteConfirm = false;
-                        delBtnText.setText('DELETE SAVE');
-                        delBtnBg.setFillStyle(0x663333);
+
+            MENU_ITEMS.forEach((item, idx) => {
+                const col = idx % COLS;
+                const row = Math.floor(idx / COLS);
+                const cx  = gridStartX + col * cellW;
+                const cy  = gridStartY + row * cellH;
+
+                // アイコン背景
+                const gfx = scene.add.graphics().setScrollFactor(0);
+                const drawIcon = (color, bright) => {
+                    gfx.clear();
+                    const c = bright
+                        ? Phaser.Display.Color.IntegerToColor(color).brighten(30).color32
+                        : color;
+                    gfx.fillStyle(c, 1);
+                    gfx.fillRoundedRect(cx - iSz/2, cy - iSz/2, iSz, iSz, iR);
+                    // 上部光沢
+                    gfx.fillStyle(0xffffff, 0.10);
+                    gfx.fillRoundedRect(cx - iSz/2 + 3, cy - iSz/2 + 3, iSz - 6, iSz/2 - 3,
+                        { tl: iR-3, tr: iR-3, bl:0, br:0 });
+                    // 枠線
+                    gfx.lineStyle(1, 0xffffff, 0.15);
+                    gfx.strokeRoundedRect(cx - iSz/2, cy - iSz/2, iSz, iSz, iR);
+                };
+                drawIcon(item.color, false);
+                gfx.setInteractive(
+                    new Phaser.Geom.Rectangle(cx - iSz/2, cy - iSz/2, iSz, iSz),
+                    Phaser.Geom.Rectangle.Contains
+                );
+                menuPanel.add(gfx);
+
+                // 絵文字アイコン
+                const iconEmoji = scene.add.text(cx, cy - 2, item.icon, { fontSize: '28px' })
+                    .setOrigin(0.5).setScrollFactor(0);
+                menuPanel.add(iconEmoji);
+
+                // ラベル
+                const lbl = scene.add.text(cx, cy + iSz / 2 + 4, item.label, {
+                    fontSize: '10px', color: '#aabbd0'
+                }).setOrigin(0.5, 0).setScrollFactor(0);
+                menuPanel.add(lbl);
+
+                // ホバー演出
+                gfx.on('pointerover', () => { if (!item.isDel || !deleteConfirm) drawIcon(item.color, true); });
+                gfx.on('pointerout',  () => { if (!item.isDel || !deleteConfirm) drawIcon(item.color, false); });
+
+                // クリック処理
+                if (item.isDel) {
+                    gfx.on('pointerdown', () => {
+                        if (!deleteConfirm) {
+                            playSE('ui_error');
+                            deleteConfirm = true;
+                            iconEmoji.setText('⚠');
+                            lbl.setText('本当に？');
+                            drawIcon(0x991111, false);
+                            scene.time.delayedCall(3000, () => {
+                                if (deleteConfirm) {
+                                    deleteConfirm = false;
+                                    iconEmoji.setText('🗑');
+                                    lbl.setText('データ削除');
+                                    drawIcon(item.color, false);
+                                }
+                            });
+                        } else {
+                            playSE('ui_success');
+                            resetGame(scene);
+                            deleteConfirm = false;
+                        }
+                    });
+                } else if (item.isSave) {
+                    gfx.on('pointerdown', () => {
+                        playSE('ui_success');
+                        saveGame(scene);
+                        drawIcon(0x22aa44, false);
+                        iconEmoji.setText('✅');
+                        scene.time.delayedCall(700, () => {
+                            drawIcon(item.color, false);
+                            iconEmoji.setText('💾');
+                        });
                     });
                 } else {
-                    // 2回目: 実行
-                    playSE('ui_success');
-                    resetGame(scene);
-                    deleteConfirm = false;
+                    gfx.on('pointerdown', () => {
+                        playSE('ui_click');
+                        item.action();
+                    });
                 }
             });
-            delBtnText.on('pointerdown', () => delBtnBg.emit('pointerdown'));
-            menuPanel.add([delBtnBg, delBtnText]);
-
-            // --- 図鑑ボタン ---
-            const encBtnBg = scene.add.rectangle(-panelW / 2, 240, panelW - 30, 44, 0x333366)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const encBtnText = scene.add.text(-panelW / 2, 240, 'アイテム図鑑', {
-                fontSize: '15px', color: '#aaccff', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            encBtnBg.on('pointerdown', () => {
-                playSE('ui_click');
-                openEncyclopedia(scene);
-            });
-            encBtnText.on('pointerdown', () => encBtnBg.emit('pointerdown'));
-            menuPanel.add([encBtnBg, encBtnText]);
-
-            // --- 生き物図鑑ボタン ---
-            const creBtnBg = scene.add.rectangle(-panelW / 2, 300, panelW - 30, 44, 0x335533)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const creBtnText = scene.add.text(-panelW / 2, 300, '生き物図鑑', {
-                fontSize: '15px', color: '#aaffcc', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            creBtnBg.on('pointerdown', () => {
-                playSE('ui_click');
-                openCreatureBook(scene);
-            });
-            creBtnText.on('pointerdown', () => creBtnBg.emit('pointerdown'));
-            menuPanel.add([creBtnBg, creBtnText]);
-
-            // --- ペットボタン ---
-            const petBtnBg = scene.add.rectangle(-panelW / 2, 360, panelW - 30, 44, 0x553366)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const petBtnText = scene.add.text(-panelW / 2, 360, '🐾 ペット', {
-                fontSize: '15px', color: '#ffccff', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            petBtnBg.on('pointerdown', () => {
-                playSE('ui_click');
-                openPetList(scene);
-            });
-            petBtnText.on('pointerdown', () => petBtnBg.emit('pointerdown'));
-            menuPanel.add([petBtnBg, petBtnText]);
-
-            // --- 自宅へ帰るボタン ---
-            const homeBtnBg = scene.add.rectangle(-panelW / 2, 420, panelW - 30, 44, 0x335533)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const homeBtnText = scene.add.text(-panelW / 2, 420, '自宅へ帰る', {
-                fontSize: '16px', color: '#88ff88', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            homeBtnBg.on('pointerdown', () => {
-                playSE('ui_success');
-                isMenuOpen = false;
-                menuPanel.setVisible(false);
-                if (homePosition) {
-                    player.setPosition(homePosition.x, homePosition.y);
-                } else {
-                    player.setPosition(3000, 668);
-                }
-                player.setVelocity(0, 0);
-            });
-            homeBtnText.on('pointerdown', () => homeBtnBg.emit('pointerdown'));
-            menuPanel.add([homeBtnBg, homeBtnText]);
-
-            // --- 操作方法ボタン ---
-            const helpBtnBg = scene.add.rectangle(-panelW / 2, 480, panelW - 30, 44, 0x555555)
-                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const helpBtnText = scene.add.text(-panelW / 2, 480, '操作方法', {
-                fontSize: '16px', color: '#fff', fontStyle: 'bold'
-            }).setOrigin(0.5).setScrollFactor(0);
-            helpBtnBg.on('pointerdown', () => {
-                playSE('ui_click');
-                openHelpScreen(scene);
-            });
-            helpBtnText.on('pointerdown', () => helpBtnBg.emit('pointerdown'));
-            menuPanel.add([helpBtnBg, helpBtnText]);
-
-            // パネル背景クリック貫通防止
-            bg.on('pointerdown', () => {});
         }
 
         // === 操作方法画面 ===
@@ -5698,7 +6016,9 @@
                 playerHP: playerHP,
                 playerMaxHearts: playerMaxHearts,
                 encounteredCreatures: [...encounteredCreatures],
-                encounteredItems: [...encounteredItems]
+                encounteredItems: [...encounteredItems],
+                gameStats: { ...gameStats },
+                unlockedAchievements: [...unlockedAchievements]
             };
 
             try {
@@ -6831,6 +7151,7 @@
 
             // HP回復
             healPlayer(scene, healAmount);
+            gameStats.foodEaten++;
 
             // 効果音（もぐもぐ感）: 2回鳴らして食べてる感じを出す
             playSE('eat');
@@ -6895,6 +7216,7 @@
 
         function addMoney(amount) {
             playerMoney += amount;
+            if (amount > 0) gameStats.totalEarned += amount;
             updateMoneyUI();
         }
 
@@ -7561,6 +7883,7 @@
         }
 
         function killSlime(scene, sl, index) {
+            gameStats.slimesKilled++;
             playSE('slime_die');
 
             // 消滅パーティクル演出
@@ -8561,7 +8884,8 @@
                     menuButton.setPosition(menuBtnX, menuBtnY);
                     menuButtonText.setPosition(menuBtnX, menuBtnY);
                     if (menuPanel) {
-                        menuPanel.setPosition(menuBtnX + buttonRadius, menuBtnY + buttonRadius + 10);
+                        // パネル右端をメニューボタン右端に揃え、ボタン直下から表示
+                        menuPanel.setPosition(menuBtnX + buttonRadius + 4, menuBtnY + buttonRadius + 8);
                     }
                 }
 
@@ -8735,11 +9059,21 @@
             // ミニマップ更新
             updateMinimap(this, time);
 
+            // 最大深度を更新
+            gameStats.maxDepthM = Math.max(gameStats.maxDepthM, Math.max(0, Math.floor((player.y - WORLD_GROUND_Y) / 4)));
+
             // 生き物との遭遇判定（ENCOUNTER_CHECK_INTERVALごと）
             _encounterCheckTimer += delta;
             if (_encounterCheckTimer >= ENCOUNTER_CHECK_INTERVAL) {
                 _encounterCheckTimer = 0;
                 checkCreatureEncounters(this);
+            }
+
+            // 実績チェック（ACHIEVEMENT_CHECK_INTERVALごと）
+            _achievementCheckTimer += delta;
+            if (_achievementCheckTimer >= ACHIEVEMENT_CHECK_INTERVAL) {
+                _achievementCheckTimer = 0;
+                checkAchievements(this);
             }
 
             // アイテム初入手ポップアップのドレイン
@@ -9859,7 +10193,7 @@
                 const isUI_TopRight = p.y < 150 && p.x > scene.scale.width - 150;
                 const isUI_CraftArea = p.x > scene.scale.width - 100 && p.y > scene.scale.height / 2 - 50 && p.y < scene.scale.height / 2 + 50;
                 const isUI_CraftPanel = isCraftPanelOpen && p.x > scene.scale.width - 250 && p.y > 100 && p.y < 500;
-                const isUI_MenuPanel = isMenuOpen && p.x > scene.scale.width - 280 && p.y > 100 && p.y < 350;
+                const isUI_MenuPanel = isMenuOpen && p.x > scene.scale.width - 290 && p.y > 150 && p.y < 560;
                 const isUI_WorkbenchPanel = isWorkbenchPanelOpen || isFurnacePanelOpen || isCookingPanelOpen || isShopOpen;
                 // バッグが開いている場合、バッグUI領域のタッチのみブロック
                 let isUI_BagPanel = false;
@@ -9874,12 +10208,6 @@
                 }
 
                 if ((isUI_Left || isUI_Right || isUI_TopRight || isUI_CraftArea || isUI_CraftPanel || isUI_MenuPanel || isUI_WorkbenchPanel || isUI_BagPanel) && p.isDown) continue;
-
-                // メニューが開いている時にゲーム画面をタッチしたら閉じる
-                if (isMenuOpen && p.isDown && !isUI_MenuPanel && !isUI_TopRight) {
-                    isMenuOpen = false;
-                    menuPanel.setVisible(false);
-                }
 
                 // カメラのズーム・スクロールを反映した正確なワールド座標を取得
                 const cam = scene.cameras.main;
@@ -10021,6 +10349,7 @@
                             if (friendship >= RABBIT_TAME_THRESHOLD) {
                                 // ペット化！
                                 rb.setData('tamed', true);
+                                gameStats.rabbitTamed = true;
                                 // カラー変化を保持しつつ♥アイコンで区別
                                 const rbCi = rb.getData('colorIndex');
                                 rb.setTint(RABBIT_COLORS[rbCi !== undefined ? rbCi : 0]);
@@ -10074,6 +10403,7 @@
 
                             // 即座に仲間化！
                             dg.setData('tamed', true);
+                            gameStats.dogTamed = true;
                             // カラー変化を保持しつつ♥アイコンで区別
                             const dgCi = dg.getData('colorIndex');
                             dg.setTint(DOG_COLORS[dgCi !== undefined ? dgCi : 0]);
@@ -10115,6 +10445,7 @@
 
                             // 仲間化！
                             ch.setData('tamed', true);
+                            gameStats.chickenTamed = true;
                             const chCi = ch.getData('colorIndex') || 0;
                             ch.setTint(CHICKEN_COLORS[chCi]);
                             const chHeart = scene.add.text(ch.x, ch.y - 18, '♥', {
@@ -10817,6 +11148,7 @@
                             }
 
                             if (currentHp <= 0) {
+                                gameStats.blocksMined++;
                                 // ひびオーバーレイがあれば削除
                                 const crackSprite = targetBlock.getData('crackSprite');
                                 if (crackSprite) crackSprite.destroy();
@@ -11072,6 +11404,7 @@
                             createDeco(scene, activeItem.type, gridX, gridY);
                             ghostSelector.setVisible(false);
                             activeItem.count--;
+                            gameStats.blocksPlaced++;
                             if (activeItem.count <= 0) { activeItem.type = null; activeItem.texture = null; }
                             updateInventoryUI();
                             playSE('place_wood');
@@ -11119,6 +11452,7 @@
                             wallMap.set(wallKey(gridX, gridY), { type: activeItem.type, sprite: wallSpr });
                             ghostSelector.setVisible(false);
                             activeItem.count--;
+                            gameStats.blocksPlaced++;
                             if (activeItem.count <= 0) { activeItem.type = null; activeItem.texture = null; }
                             updateInventoryUI();
                             playSE('place');
@@ -11274,6 +11608,7 @@
                                 nb.setData('hp', bd.hp);
                                 playSE('place_wood');
                                 activeItem.count--;
+                                gameStats.blocksPlaced++;
                                 if (activeItem.count <= 0) { activeItem.type = null; activeItem.texture = null; }
                                 updateInventoryUI();
                             });
@@ -11408,6 +11743,7 @@
                         ghostSelector3.setVisible(false);
 
                         activeItem.count--;
+                        gameStats.blocksPlaced++;
                         if (activeItem.count <= 0) {
                             activeItem.type = null;
                             activeItem.texture = null;
