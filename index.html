@@ -360,6 +360,7 @@
             rabbit_tamed: { type: 'sine',   freq: 500, endFreq: 1000, duration: 0.4, vol: 0.15 },
             dog_bark:     { type: 'square', freq: 300, endFreq: 450, duration: 0.12, vol: 0.10 },
             dog_tamed:    { type: 'sine',   freq: 450, endFreq: 900, duration: 0.5,  vol: 0.15 },
+            chicken_tamed:{ type: 'sine',   freq: 550, endFreq: 1100, duration: 0.35, vol: 0.15 },
             furnace_done: { type: 'sine',   freq: 600, endFreq: 900, duration: 0.3,  vol: 0.12 },
             chest_open: { type: 'sine',     freq: 400, endFreq: 800, duration: 0.3,  vol: 0.15 },
             place:      { type: 'triangle', freq: 200, endFreq: 350, duration: 0.10, vol: 0.13 },
@@ -582,6 +583,9 @@
         let isEncyclopediaOpen = false;
         let creatureBookOverlay = null;
         let isCreatureBookOpen = false;
+
+        let petListOverlay = null;
+        let isPetListOpen = false;
 
         const BLOCK_TYPES = {
             EMPTY: 0,
@@ -1839,7 +1843,7 @@
                 // ニワトリを復元
                 if (_saveData.chickens) {
                     for (const sc of _saveData.chickens) {
-                        spawnChicken(this, sc.x, sc.y);
+                        spawnChicken(this, sc.x, sc.y, sc.tamed);
                     }
                 }
             } else {
@@ -2922,6 +2926,9 @@
                 } else if (isHelpOpen) {
                     playSE('ui_click');
                     closeHelpScreen();
+                } else if (isPetListOpen) {
+                    playSE('ui_click');
+                    closePetList(this);
                 } else if (isCreatureBookOpen) {
                     closeCreatureBook(this);
                 } else if (isEncyclopediaOpen) {
@@ -3097,12 +3104,6 @@
             const width = scene.scale.width;
             const height = scene.scale.height;
 
-            craftButtonOpen = scene.add.image(width - 50, height / 2, 'button')
-                .setInteractive().setScrollFactor(0).setDepth(200);
-            craftButtonOpenText = scene.add.text(width - 50, height / 2, 'クラフト',
-                { fontSize: '14px', color: '#fff', fontStyle: 'bold' })
-                .setOrigin(0.5).setScrollFactor(0).setDepth(201);
-
             craftPanel = scene.add.container(width, 100).setScrollFactor(0).setDepth(200);
             const bg = scene.add.rectangle(0, 0, 250, 400, 0x000000, 0.8).setOrigin(1, 0).setScrollFactor(0).setInteractive();
             const panelTitle = scene.add.text(-240, 10, 'クラフト', { fontSize: '20px', color: '#fff', fontStyle: 'bold' }).setScrollFactor(0);
@@ -3142,18 +3143,6 @@
                 craftPanel.add([icon, tObj, btnBox, btnText]);
             }
 
-            craftButtonOpen.setInteractive({ useHandCursor: true });
-            craftButtonOpenText.setInteractive({ useHandCursor: true });
-
-            const togglePanel = () => {
-                playSE('ui_click');
-                isCraftPanelOpen = !isCraftPanelOpen;
-                craftPanel.setX(isCraftPanelOpen ? width : width + 250);
-            };
-
-            craftButtonOpen.on('pointerdown', togglePanel);
-            craftButtonOpenText.on('pointerdown', togglePanel);
-            
             // クラフト画面奥へのクリック貫通は、別の判定処理(updateInteraction)で既に保護しているため
             // stopPropagation による副作用（子要素のボタンが押せなくなること）を防ぐため削除します。
             bg.on('pointerdown', () => {});
@@ -4137,7 +4126,7 @@
             { type: BLOCK_TYPES.WEED,      name: '雑草',         desc: '地表に生える草。刈ると稀に小麦の種が手に入る。' },
             { type: BLOCK_TYPES.FLOWER,    name: '花',           desc: '地表に咲く小さな花。刈り取ることができる。' },
             { type: BLOCK_TYPES.WHEAT_SEED, name: '小麦の種',    desc: '雑草を刈ると稀に手に入る種。草/土に植えられる。' },
-            { type: BLOCK_TYPES.WHEAT,      name: '小麦',         desc: '種から育てた作物。収穫して売ったり加工に使える。' },
+            { type: BLOCK_TYPES.WHEAT,      name: '小麦',         desc: '種から育てた作物。収穫して売ったり加工に使える。ニワトリに与えると仲間になる。' },
             { type: BLOCK_TYPES.BONE,       name: '骨',           desc: '地下洞窟で稀に見つかる。犬に与えると仲間になる。' },
             { type: BLOCK_TYPES.WATER,      name: '水',           desc: '地上や地下の池に存在する。通り抜けることができる。' },
             { type: BLOCK_TYPES.LUMBER,     name: '材木',         desc: '作業台で木1個から2つ作成。木のドアの材料になる。' },
@@ -4408,16 +4397,39 @@
             const rabbitInfo   = g('rabbit',   'うさぎ',   '草原や地下に住む小動物。近づくと逃げてしまう。');
             const dogInfo      = g('dog',      '犬',       '骨を与えると仲間になる忠実な動物。');
             const chickenInfo  = g('chicken',  'ニワトリ', '地上をてくてく歩く鳥。しばらく待つとたまごをくれる。');
+
+            // うさぎ・犬・ニワトリは色ごとに1エントリずつ展開
+            const rColors    = (typeof RABBIT_COLORS     !== 'undefined' && RABBIT_COLORS)     || [0xffffff, 0xbbbbbb, 0xcc8855, 0x444444, 0xffd966];
+            const rColorNames= (typeof RABBIT_COLOR_NAMES!== 'undefined' && RABBIT_COLOR_NAMES)|| ['白','グレー','茶','黒','クリーム'];
+            const dColors    = (typeof DOG_COLORS        !== 'undefined' && DOG_COLORS)        || [0xffffff, 0xffee88, 0xaaaaaa, 0x333333, 0xffd0b0];
+            const dColorNames= (typeof DOG_COLOR_NAMES   !== 'undefined' && DOG_COLOR_NAMES)   || ['茶','ゴールデン','グレー','黒','クリーム'];
+            const cColors    = [0xffffff, 0xffee88, 0xff9966, 0xffccaa, 0xaaaaaa];
+            const cColorNames= ['白', '黄', 'オレンジ', 'クリーム', 'グレー'];
+
+            const rabbitEntries = rColors.map(function(col, i) {
+                return { id: 'rabbit_' + i, name: rabbitInfo.name + '（' + (rColorNames[i] || i) + '）',
+                         desc: rabbitInfo.desc, texture: 'rabbit', frame: 0, tint: col, category: 'animal' };
+            });
+            const dogEntries = dColors.map(function(col, i) {
+                return { id: 'dog_' + i, name: dogInfo.name + '（' + (dColorNames[i] || i) + '）',
+                         desc: dogInfo.desc, texture: 'dog', frame: 0, tint: col, category: 'animal' };
+            });
+            const chickenEntries = cColors.map(function(col, i) {
+                return { id: 'chicken_' + i, name: chickenInfo.name + '（' + (cColorNames[i] || i) + '）',
+                         desc: chickenInfo.desc, texture: 'chicken', frame: 0, tint: col, category: 'animal' };
+            });
+
             return [
-                { id: 'merchant', name: merchantInfo.name, desc: merchantInfo.desc, texture: 'merchant', frame: 0, category: 'human' },
-                { id: 'renji',    name: renjiInfo.name,    desc: renjiInfo.desc,    texture: 'renji',    frame: 0, category: 'creature' },
-                { id: 'customer', name: customerInfo.name, desc: customerInfo.desc, texture: 'alien',    frame: 0, category: 'creature' },
-                { id: 'slime',    name: slimeInfo.name,    desc: slimeInfo.desc,    texture: 'slime',    frame: 0, category: 'creature' },
-                { id: 'rabbit',   name: rabbitInfo.name,   desc: rabbitInfo.desc,   texture: 'rabbit',   frame: 0, category: 'animal' },
-                { id: 'dog',      name: dogInfo.name,      desc: dogInfo.desc,      texture: 'dog',      frame: 0, category: 'animal' },
-                { id: 'chicken',  name: chickenInfo.name,  desc: chickenInfo.desc,  texture: 'chicken',  frame: 0, category: 'animal' },
-            ].concat(birdSpecies.map(function(sp) {
-                return { id: sp.id, name: sp.name, desc: sp.desc, texture: sp.id, frame: 0, category: 'animal' };
+                { id: 'merchant', name: merchantInfo.name, desc: merchantInfo.desc, texture: 'merchant', frame: 0, tint: null, category: 'human' },
+                { id: 'renji',    name: renjiInfo.name,    desc: renjiInfo.desc,    texture: 'renji',    frame: 0, tint: null, category: 'creature' },
+                { id: 'customer', name: customerInfo.name, desc: customerInfo.desc, texture: 'alien',    frame: 0, tint: null, category: 'creature' },
+                { id: 'slime',    name: slimeInfo.name,    desc: slimeInfo.desc,    texture: 'slime',    frame: 0, tint: null, category: 'creature' },
+            ]
+            .concat(rabbitEntries)
+            .concat(dogEntries)
+            .concat(chickenEntries)
+            .concat(birdSpecies.map(function(sp) {
+                return { id: sp.id, name: sp.name, desc: sp.desc, texture: sp.id, frame: 0, tint: null, category: 'animal' };
             }));
         }
         // creatures.json 読み込み前はデフォルト値で初期化、applyCreatureData() で上書き
@@ -4442,11 +4454,10 @@
 
             const dimBg = scene.add.rectangle(sw / 2, sh / 2, sw, sh, 0x000000, 0.80)
                 .setScrollFactor(0).setInteractive();
-            dimBg.on('pointerdown', () => {});
             creatureBookOverlay.add(dimBg);
 
-            const panelW = Math.min(440, sw - 30);
-            const panelH = Math.min(sh - 50, 540);
+            const panelW = Math.min(480, sw - 20);
+            const panelH = Math.min(sh - 40, 560);
             const panelX = sw / 2;
             const panelY = sh / 2;
 
@@ -4476,57 +4487,155 @@
             let tabTexts = [];
             let activeTab = 0;
 
-            // リスト表示エリア
-            const listTop = tabY + tabH + 8;
-            const rowH = 50;
-            const listLeft = panelX - panelW / 2 + 20;
-            const visibleH = (panelY + panelH / 2 - 10) - listTop;
+            // コンテンツエリア（タブより下）
+            const contentTop = tabY + tabH / 2 + 10;
+            const contentBottom = panelY + panelH / 2 - 10;
+            const contentH = contentBottom - contentTop;
 
+            // 左（グリッド）・右（詳細）の分割
+            const gridRatio = 0.56;
+            const gridAreaL = panelX - panelW / 2 + 8;
+            const gridAreaW = Math.floor(panelW * gridRatio) - 12;
+            const dividerX = gridAreaL + gridAreaW + 4;
+            const detailAreaL = dividerX + 6;
+            const detailAreaW = (panelX + panelW / 2 - 8) - detailAreaL;
+
+            // 区切り線
+            const divLine = scene.add.graphics().setScrollFactor(0);
+            divLine.lineStyle(1, 0x446644, 0.5);
+            divLine.beginPath();
+            divLine.moveTo(dividerX, contentTop);
+            divLine.lineTo(dividerX, contentBottom);
+            divLine.strokePath();
+            creatureBookOverlay.add(divLine);
+
+            // グリッド設定
+            const COLS = 4;
+            const cellPad = 3;
+            const cellSize = Math.floor((gridAreaW - 2) / COLS);
+            const iconSize = Math.max(16, cellSize - cellPad * 2 - 2);
+
+            // マスク（グリッドスクロール用）
             const maskShape = scene.make.graphics();
             maskShape.setScrollFactor(0);
-            maskShape.fillRect(panelX - panelW / 2, listTop, panelW, visibleH);
+            maskShape.fillRect(gridAreaL, contentTop, gridAreaW, contentH);
             const mask = maskShape.createGeometryMask();
 
-            let listContainer = scene.add.container(0, 0).setScrollFactor(0);
-            listContainer.setMask(mask);
-            creatureBookOverlay.add(listContainer);
+            let gridContainer = scene.add.container(0, 0).setScrollFactor(0);
+            gridContainer.setMask(mask);
+            creatureBookOverlay.add(gridContainer);
 
             let scrollY = 0;
             let maxScroll = 0;
+            let selectedEntry = null;
+            let selectedCellBg = null;
 
-            function renderList(catIndex) {
-                listContainer.removeAll(true);
+            // 詳細パネル
+            const detailCX = detailAreaL + detailAreaW / 2;
+            const detailImgY = contentTop + Math.min(60, contentH * 0.15);
+            const detailImgSize = Math.min(72, detailAreaW - 16, contentH * 0.3);
+            const detailNameY = detailImgY + detailImgSize / 2 + 10;
+            const detailDescY = detailNameY + 28;
+
+            const detailBg = scene.add.rectangle(
+                detailAreaL + detailAreaW / 2, contentTop + contentH / 2,
+                detailAreaW, contentH, 0x162616, 0.6
+            ).setScrollFactor(0);
+            creatureBookOverlay.add(detailBg);
+
+            const detailPlaceholder = scene.add.text(
+                detailCX, contentTop + contentH / 2,
+                '←\n生き物を\n選んでね',
+                { fontSize: '13px', color: '#557755', align: 'center' }
+            ).setOrigin(0.5).setScrollFactor(0);
+            creatureBookOverlay.add(detailPlaceholder);
+
+            const detailImg = scene.add.image(detailCX, detailImgY, 'slime', 0)
+                .setDisplaySize(detailImgSize, detailImgSize).setScrollFactor(0).setVisible(false);
+            creatureBookOverlay.add(detailImg);
+
+            const detailName = scene.add.text(detailCX, detailNameY, '', {
+                fontSize: '13px', color: '#aaffcc', fontStyle: 'bold', align: 'center',
+                wordWrap: { width: detailAreaW - 8 }
+            }).setOrigin(0.5, 0).setScrollFactor(0).setVisible(false);
+            creatureBookOverlay.add(detailName);
+
+            const detailDesc = scene.add.text(detailAreaL + 6, detailDescY, '', {
+                fontSize: '11px', color: '#aaccaa', align: 'left',
+                wordWrap: { width: detailAreaW - 10 }
+            }).setOrigin(0, 0).setScrollFactor(0).setVisible(false);
+            creatureBookOverlay.add(detailDesc);
+
+            function showDetail(entry) {
+                selectedEntry = entry;
+                detailPlaceholder.setVisible(false);
+                detailImg.setTexture(entry.texture, entry.frame);
+                if (entry.tint != null) detailImg.setTint(entry.tint);
+                else detailImg.clearTint();
+                detailImg.setDisplaySize(detailImgSize, detailImgSize).setVisible(true);
+                detailName.setText(entry.name).setVisible(true);
+                detailDesc.setText(entry.desc).setVisible(true);
+            }
+
+            function renderGrid(catIndex) {
+                gridContainer.removeAll(true);
                 scrollY = 0;
-                listContainer.setY(0);
+                gridContainer.setY(0);
+                selectedCellBg = null;
 
                 const cat = CREATURE_BOOK_CATEGORIES[catIndex];
                 const entries = CREATURE_BOOK.filter(e => e.category === cat.key);
 
                 for (let i = 0; i < entries.length; i++) {
                     const entry = entries[i];
-                    const yPos = listTop + i * rowH;
+                    const col = i % COLS;
+                    const row = Math.floor(i / COLS);
+                    const cx = gridAreaL + col * cellSize + cellSize / 2;
+                    const cy = contentTop + row * cellSize + cellSize / 2;
 
-                    const rowBg = scene.add.rectangle(panelX, yPos + rowH / 2 - 5, panelW - 30, rowH - 4,
-                        i % 2 === 0 ? 0x223322 : 0x1a2a1a, 0.7).setScrollFactor(0);
-                    listContainer.add(rowBg);
+                    const cellBg = scene.add.rectangle(
+                        cx, cy, cellSize - 2, cellSize - 2, 0x223322, 0.85
+                    ).setScrollFactor(0).setStrokeStyle(1, 0x335533)
+                      .setInteractive({ useHandCursor: true });
+                    gridContainer.add(cellBg);
 
-                    const icon = scene.add.image(listLeft + 16, yPos + rowH / 2 - 5, entry.texture, entry.frame)
-                        .setDisplaySize(32, 32).setScrollFactor(0);
-                    listContainer.add(icon);
+                    const icon = scene.add.image(cx, cy, entry.texture, entry.frame)
+                        .setDisplaySize(iconSize, iconSize).setScrollFactor(0);
+                    if (entry.tint != null) icon.setTint(entry.tint);
+                    gridContainer.add(icon);
 
-                    const nameText = scene.add.text(listLeft + 42, yPos + 2, entry.name, {
-                        fontSize: '15px', color: '#ffffff', fontStyle: 'bold'
-                    }).setScrollFactor(0);
-                    listContainer.add(nameText);
-
-                    const descText = scene.add.text(listLeft + 42, yPos + 22, entry.desc, {
-                        fontSize: '11px', color: '#aaccaa', wordWrap: { width: panelW - 100 }
-                    }).setScrollFactor(0);
-                    listContainer.add(descText);
+                    cellBg.on('pointerdown', () => {
+                        playSE('ui_click');
+                        if (selectedCellBg) selectedCellBg.setStrokeStyle(1, 0x335533).setFillStyle(0x223322, 0.85);
+                        cellBg.setStrokeStyle(2, 0xffee44).setFillStyle(0x334433, 1);
+                        selectedCellBg = cellBg;
+                        showDetail(entry);
+                    });
+                    cellBg.on('pointerover', () => {
+                        if (cellBg !== selectedCellBg) cellBg.setStrokeStyle(1, 0x88cc88);
+                    });
+                    cellBg.on('pointerout', () => {
+                        if (cellBg !== selectedCellBg) cellBg.setStrokeStyle(1, 0x335533);
+                    });
                 }
 
-                const totalH = entries.length * rowH;
-                maxScroll = Math.max(0, totalH - visibleH);
+                const rows = Math.ceil(entries.length / COLS);
+                maxScroll = Math.max(0, rows * cellSize - contentH);
+
+                // 最初のエントリを自動選択
+                if (entries.length > 0) {
+                    const firstCellBg = gridContainer.getAt(0);
+                    if (firstCellBg) {
+                        firstCellBg.setStrokeStyle(2, 0xffee44).setFillStyle(0x334433, 1);
+                        selectedCellBg = firstCellBg;
+                    }
+                    showDetail(entries[0]);
+                } else {
+                    detailImg.setVisible(false);
+                    detailName.setVisible(false);
+                    detailDesc.setVisible(false);
+                    detailPlaceholder.setVisible(true);
+                }
             }
 
             // タブUI
@@ -4545,7 +4654,7 @@
                     playSE('ui_click');
                     activeTab = t;
                     updateTabVisuals();
-                    renderList(t);
+                    renderGrid(t);
                 });
 
                 creatureBookOverlay.add(tBg);
@@ -4570,32 +4679,43 @@
             }
 
             updateTabVisuals();
-            renderList(0);
+            renderGrid(0);
 
-            // スクロール処理
+            // スクロール処理（マウスホイール）
             const doScroll = (deltaY) => {
                 scrollY = Phaser.Math.Clamp(scrollY + deltaY, 0, maxScroll);
-                listContainer.setY(-scrollY);
+                gridContainer.setY(-scrollY);
             };
-
             const wheelHandler = (pointer, gameObjects, dx, dy) => {
                 if (!isCreatureBookOpen) return;
-                doScroll(dy > 0 ? 40 : -40);
+                doScroll(dy > 0 ? cellSize : -cellSize);
             };
             scene.input.on('wheel', wheelHandler);
 
+            // タッチ・ドラッグスクロール（グリッドエリア内）
             let dragStartY = 0;
             let dragScrollStart = 0;
+            let isDragging = false;
+            const DRAG_THRESHOLD = 6;
+
             dimBg.on('pointerdown', (pointer) => {
-                dragStartY = pointer.y;
-                dragScrollStart = scrollY;
+                if (pointer.x >= gridAreaL && pointer.x <= dividerX &&
+                    pointer.y >= contentTop && pointer.y <= contentBottom) {
+                    dragStartY = pointer.y;
+                    dragScrollStart = scrollY;
+                    isDragging = false;
+                }
             });
             dimBg.on('pointermove', (pointer) => {
                 if (!pointer.isDown) return;
                 const delta = dragStartY - pointer.y;
-                scrollY = Phaser.Math.Clamp(dragScrollStart + delta, 0, maxScroll);
-                listContainer.setY(-scrollY);
+                if (Math.abs(delta) > DRAG_THRESHOLD) isDragging = true;
+                if (isDragging) {
+                    scrollY = Phaser.Math.Clamp(dragScrollStart + delta, 0, maxScroll);
+                    gridContainer.setY(-scrollY);
+                }
             });
+            dimBg.on('pointerup', () => { isDragging = false; });
 
             creatureBookOverlay.setData('wheelHandler', wheelHandler);
             creatureBookOverlay.setData('maskShape', maskShape);
@@ -4613,12 +4733,194 @@
             isCreatureBookOpen = false;
         }
 
+        // ===================================================
+        // ペット一覧画面
+        // ===================================================
+        function openPetList(scene) {
+            if (petListOverlay) return;
+            isPetListOpen = true;
+            isMenuOpen = false;
+            menuPanel.setVisible(false);
+
+            // 表示データ収集
+            const petEntries = [];
+
+            // 仲間うさぎ
+            for (const rb of rabbits) {
+                if (!rb.active || !rb.getData('tamed')) continue;
+                const ci = rb.getData('colorIndex') || 0;
+                const colorName = (RABBIT_COLOR_NAMES && RABBIT_COLOR_NAMES[ci]) || '不明';
+                const friendship = rb.getData('friendship') || 0;
+                petEntries.push({
+                    type: 'rabbit',
+                    label: 'うさぎ [' + colorName + ']',
+                    sub: 'なかよし度: ' + friendship + ' / ' + RABBIT_TAME_THRESHOLD,
+                    texture: 'rabbit',
+                    frame: 0,
+                    tint: (typeof RABBIT_COLORS !== 'undefined' && RABBIT_COLORS[ci]) ? RABBIT_COLORS[ci] : 0xffffff
+                });
+            }
+
+            // 仲間犬
+            for (const dg of dogs) {
+                if (!dg.active || !dg.getData('tamed')) continue;
+                const ci = dg.getData('colorIndex') || 0;
+                const colorName = (DOG_COLOR_NAMES && DOG_COLOR_NAMES[ci]) || '不明';
+                petEntries.push({
+                    type: 'dog',
+                    label: '犬 [' + colorName + ']',
+                    sub: 'お供中',
+                    texture: 'dog',
+                    frame: 0,
+                    tint: (typeof DOG_COLORS !== 'undefined' && DOG_COLORS[ci]) ? DOG_COLORS[ci] : 0xffffff
+                });
+            }
+
+            // 仲間化済みニワトリ
+            const CHICKEN_COLOR_NAMES_LOCAL = ['白', '黄', 'オレンジ', 'クリーム', 'グレー'];
+            for (const ch of chickens) {
+                if (!ch.active || !ch.getData('tamed')) continue;
+                const ci = ch.getData('colorIndex') || 0;
+                const colorName = CHICKEN_COLOR_NAMES_LOCAL[ci] || '不明';
+                petEntries.push({
+                    type: 'chicken',
+                    label: 'ニワトリ [' + colorName + ']',
+                    sub: '小麦で仲間になった ・ たまごを産む',
+                    texture: 'chicken',
+                    frame: 0,
+                    tint: CHICKEN_COLORS[ci] || 0xffffff
+                });
+            }
+
+            // オーバーレイ構築
+            petListOverlay = scene.add.container(0, 0).setScrollFactor(0).setDepth(500);
+
+            const sw = scene.scale.width;
+            const sh = scene.scale.height;
+
+            const dimBg = scene.add.rectangle(sw / 2, sh / 2, sw, sh, 0x000000, 0.82)
+                .setScrollFactor(0).setInteractive();
+            dimBg.on('pointerdown', () => {});
+            petListOverlay.add(dimBg);
+
+            const panelW = Math.min(420, sw - 30);
+            const panelH = Math.min(sh - 50, 520);
+            const panelX = sw / 2;
+            const panelY = sh / 2;
+
+            const panelBg = scene.add.rectangle(panelX, panelY, panelW, panelH, 0x1e0f2e, 0.96)
+                .setScrollFactor(0).setStrokeStyle(2, 0xaa66cc);
+            petListOverlay.add(panelBg);
+
+            const titleText = scene.add.text(panelX, panelY - panelH / 2 + 22, '🐾 今飼っているペット一覧', {
+                fontSize: '18px', color: '#ffccff', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0);
+            petListOverlay.add(titleText);
+
+            const closeBtn = scene.add.text(panelX + panelW / 2 - 16, panelY - panelH / 2 + 10, '✕', {
+                fontSize: '22px', color: '#ff6666', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            closeBtn.on('pointerdown', () => { playSE('ui_click'); closePetList(scene); });
+            petListOverlay.add(closeBtn);
+
+            // カウント表示
+            const countText = scene.add.text(panelX, panelY - panelH / 2 + 46, '全 ' + petEntries.length + ' 匹', {
+                fontSize: '13px', color: '#ccaaff'
+            }).setOrigin(0.5).setScrollFactor(0);
+            petListOverlay.add(countText);
+
+            // リスト表示エリア
+            const listTop = panelY - panelH / 2 + 66;
+            const listBottom = panelY + panelH / 2 - 10;
+            const rowH = 56;
+            const listLeft = panelX - panelW / 2 + 16;
+            const visibleH = listBottom - listTop;
+
+            const maskShape = scene.make.graphics();
+            maskShape.setScrollFactor(0);
+            maskShape.fillRect(panelX - panelW / 2, listTop, panelW, visibleH);
+            const mask = maskShape.createGeometryMask();
+
+            const listContainer = scene.add.container(0, 0).setScrollFactor(0);
+            listContainer.setMask(mask);
+            petListOverlay.add(listContainer);
+
+            let scrollY = 0;
+            let maxScroll = 0;
+
+            if (petEntries.length === 0) {
+                // ペットなし
+                const noneText = scene.add.text(panelX, listTop + 60, 'まだペットはいません\n\nうさぎに食べ物をあげると仲間になるよ！\n犬に骨をあげると仲間になるよ！\nニワトリに小麦をあげると仲間になるよ！', {
+                    fontSize: '15px', color: '#ccaacc', align: 'center',
+                    wordWrap: { width: panelW - 40 }
+                }).setOrigin(0.5, 0).setScrollFactor(0);
+                petListOverlay.add(noneText);
+            } else {
+                for (let i = 0; i < petEntries.length; i++) {
+                    const entry = petEntries[i];
+                    const yPos = listTop + i * rowH;
+
+                    const rowBg = scene.add.rectangle(panelX, yPos + rowH / 2 - 4, panelW - 24, rowH - 6,
+                        i % 2 === 0 ? 0x2a1a3a : 0x221530, 0.75).setScrollFactor(0);
+                    listContainer.add(rowBg);
+
+                    // アイコン
+                    const icon = scene.add.image(listLeft + 18, yPos + rowH / 2 - 4, entry.texture, entry.frame)
+                        .setDisplaySize(36, 36).setScrollFactor(0).setTint(entry.tint);
+                    listContainer.add(icon);
+
+                    // 番号
+                    const numText = scene.add.text(listLeft + 44, yPos + 6, '#' + (i + 1), {
+                        fontSize: '11px', color: '#aaaaaa'
+                    }).setScrollFactor(0);
+                    listContainer.add(numText);
+
+                    // 名前
+                    const nameText = scene.add.text(listLeft + 44, yPos + 20, entry.label, {
+                        fontSize: '15px', color: '#ffffff', fontStyle: 'bold'
+                    }).setScrollFactor(0);
+                    listContainer.add(nameText);
+
+                    // サブ情報
+                    const subText = scene.add.text(listLeft + 44, yPos + 38, entry.sub, {
+                        fontSize: '11px', color: '#cc99ff'
+                    }).setScrollFactor(0);
+                    listContainer.add(subText);
+                }
+
+                const totalH = petEntries.length * rowH;
+                maxScroll = Math.max(0, totalH - visibleH);
+
+                // スクロール
+                const wheelHandler = (pointer, gameObjects, deltaX, deltaY) => {
+                    if (!isPetListOpen) return;
+                    scrollY = Phaser.Math.Clamp(scrollY + deltaY * 0.5, 0, maxScroll);
+                    listContainer.setY(-scrollY);
+                };
+                scene.input.on('wheel', wheelHandler);
+                petListOverlay.setData('wheelHandler', wheelHandler);
+            }
+
+            petListOverlay.setData('maskShape', maskShape);
+        }
+
+        function closePetList(scene) {
+            if (!petListOverlay) return;
+            const wheelHandler = petListOverlay.getData('wheelHandler');
+            if (wheelHandler) scene.input.off('wheel', wheelHandler);
+            const maskShape = petListOverlay.getData('maskShape');
+            if (maskShape) maskShape.destroy();
+            petListOverlay.destroy();
+            petListOverlay = null;
+            isPetListOpen = false;
+        }
+
         function createMenuPanel(scene) {
             menuPanel = scene.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false);
 
             // パネル背景
             const panelW = 220;
-            const panelH = 420;
+            const panelH = 540;
             const bg = scene.add.rectangle(0, 0, panelW, panelH, 0x000000, 0.85)
                 .setOrigin(1, 0).setScrollFactor(0).setInteractive();
             const title = scene.add.text(-panelW + 15, 12, 'MENU', {
@@ -4626,10 +4928,26 @@
             }).setScrollFactor(0);
             menuPanel.add([bg, title]);
 
-            // --- セーブボタン ---
-            const saveBtnBg = scene.add.rectangle(-panelW / 2, 60, panelW - 30, 44, 0x336633)
+            // --- クラフトボタン（最上部）---
+            const craftBtnBg = scene.add.rectangle(-panelW / 2, 60, panelW - 30, 44, 0x664422)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const saveBtnText = scene.add.text(-panelW / 2, 60, 'SAVE', {
+            const craftBtnText = scene.add.text(-panelW / 2, 60, '⚒ クラフト', {
+                fontSize: '16px', color: '#ffddaa', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0);
+            craftBtnBg.on('pointerdown', () => {
+                playSE('ui_click');
+                isMenuOpen = false;
+                menuPanel.setVisible(false);
+                isCraftPanelOpen = !isCraftPanelOpen;
+                craftPanel.setX(isCraftPanelOpen ? scene.scale.width : scene.scale.width + 250);
+            });
+            craftBtnText.on('pointerdown', () => craftBtnBg.emit('pointerdown'));
+            menuPanel.add([craftBtnBg, craftBtnText]);
+
+            // --- セーブボタン ---
+            const saveBtnBg = scene.add.rectangle(-panelW / 2, 120, panelW - 30, 44, 0x336633)
+                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            const saveBtnText = scene.add.text(-panelW / 2, 120, 'SAVE', {
                 fontSize: '18px', color: '#fff', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
             saveBtnBg.on('pointerdown', () => {
@@ -4642,9 +4960,9 @@
             menuPanel.add([saveBtnBg, saveBtnText]);
 
             // --- データ削除ボタン ---
-            const delBtnBg = scene.add.rectangle(-panelW / 2, 120, panelW - 30, 44, 0x663333)
+            const delBtnBg = scene.add.rectangle(-panelW / 2, 180, panelW - 30, 44, 0x663333)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const delBtnText = scene.add.text(-panelW / 2, 120, 'DELETE SAVE', {
+            const delBtnText = scene.add.text(-panelW / 2, 180, 'DELETE SAVE', {
                 fontSize: '16px', color: '#ff8888', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
 
@@ -4673,9 +4991,9 @@
             menuPanel.add([delBtnBg, delBtnText]);
 
             // --- 図鑑ボタン ---
-            const encBtnBg = scene.add.rectangle(-panelW / 2, 180, panelW - 30, 44, 0x333366)
+            const encBtnBg = scene.add.rectangle(-panelW / 2, 240, panelW - 30, 44, 0x333366)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const encBtnText = scene.add.text(-panelW / 2, 180, 'アイテム図鑑', {
+            const encBtnText = scene.add.text(-panelW / 2, 240, 'アイテム図鑑', {
                 fontSize: '15px', color: '#aaccff', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
             encBtnBg.on('pointerdown', () => {
@@ -4686,9 +5004,9 @@
             menuPanel.add([encBtnBg, encBtnText]);
 
             // --- 生き物図鑑ボタン ---
-            const creBtnBg = scene.add.rectangle(-panelW / 2, 240, panelW - 30, 44, 0x335533)
+            const creBtnBg = scene.add.rectangle(-panelW / 2, 300, panelW - 30, 44, 0x335533)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const creBtnText = scene.add.text(-panelW / 2, 240, '生き物図鑑', {
+            const creBtnText = scene.add.text(-panelW / 2, 300, '生き物図鑑', {
                 fontSize: '15px', color: '#aaffcc', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
             creBtnBg.on('pointerdown', () => {
@@ -4698,10 +5016,23 @@
             creBtnText.on('pointerdown', () => creBtnBg.emit('pointerdown'));
             menuPanel.add([creBtnBg, creBtnText]);
 
-            // --- 自宅へ帰るボタン ---
-            const homeBtnBg = scene.add.rectangle(-panelW / 2, 300, panelW - 30, 44, 0x335533)
+            // --- ペットボタン ---
+            const petBtnBg = scene.add.rectangle(-panelW / 2, 360, panelW - 30, 44, 0x553366)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const homeBtnText = scene.add.text(-panelW / 2, 300, '自宅へ帰る', {
+            const petBtnText = scene.add.text(-panelW / 2, 360, '🐾 ペット', {
+                fontSize: '15px', color: '#ffccff', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0);
+            petBtnBg.on('pointerdown', () => {
+                playSE('ui_click');
+                openPetList(scene);
+            });
+            petBtnText.on('pointerdown', () => petBtnBg.emit('pointerdown'));
+            menuPanel.add([petBtnBg, petBtnText]);
+
+            // --- 自宅へ帰るボタン ---
+            const homeBtnBg = scene.add.rectangle(-panelW / 2, 420, panelW - 30, 44, 0x335533)
+                .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            const homeBtnText = scene.add.text(-panelW / 2, 420, '自宅へ帰る', {
                 fontSize: '16px', color: '#88ff88', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
             homeBtnBg.on('pointerdown', () => {
@@ -4719,9 +5050,9 @@
             menuPanel.add([homeBtnBg, homeBtnText]);
 
             // --- 操作方法ボタン ---
-            const helpBtnBg = scene.add.rectangle(-panelW / 2, 360, panelW - 30, 44, 0x555555)
+            const helpBtnBg = scene.add.rectangle(-panelW / 2, 480, panelW - 30, 44, 0x555555)
                 .setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
-            const helpBtnText = scene.add.text(-panelW / 2, 360, '操作方法', {
+            const helpBtnText = scene.add.text(-panelW / 2, 480, '操作方法', {
                 fontSize: '16px', color: '#fff', fontStyle: 'bold'
             }).setOrigin(0.5).setScrollFactor(0);
             helpBtnBg.on('pointerdown', () => {
@@ -4818,8 +5149,8 @@
                 '右下 ▲ ボタン             ジャンプ',
                 'ブロックをタップ           採掘 / 拾う',
                 '右上 モードボタン          採掘⇔設置 切替',
-                '右 クラフトボタン          クラフトメニュー',
-                '右上 MENUボタン           メニュー表示'
+                '右上 MENUボタン           メニュー表示',
+                'メニュー → クラフト       クラフトメニュー'
             ];
 
             for (const line of spControls) {
@@ -4957,7 +5288,8 @@
                 .filter(ch => ch.active)
                 .map(ch => ({
                     x: Math.round(ch.x),
-                    y: Math.round(ch.y)
+                    y: Math.round(ch.y),
+                    tamed: ch.getData('tamed') || false
                 }));
 
             // 壁紙を保存
@@ -6427,7 +6759,7 @@
         const CHICKEN_EGG_INTERVAL_MIN = 25000; // 最短25秒でたまごを産む
         const CHICKEN_EGG_INTERVAL_MAX = 60000; // 最長60秒
 
-        function spawnChicken(scene, x, y) {
+        function spawnChicken(scene, x, y, tamed) {
             const ch = scene.physics.add.sprite(x, y, 'chicken', 0);
             ch.setCollideWorldBounds(true);
             ch.body.setSize(22, 22);
@@ -6439,9 +6771,18 @@
             ch.setData('nextChange', 2000 + Math.random() * 3000);
             ch.setData('nextEgg', CHICKEN_EGG_INTERVAL_MIN + Math.random() * (CHICKEN_EGG_INTERVAL_MAX - CHICKEN_EGG_INTERVAL_MIN));
             ch.setData('paused', false);
+            ch.setData('tamed', !!tamed);
+            ch.setData('tamedIcon', null);
             const ci = Math.floor(Math.random() * CHICKEN_COLORS.length);
             ch.setTint(CHICKEN_COLORS[ci]);
             ch.setData('colorIndex', ci);
+            // 仲間化済みなら♥アイコンを表示
+            if (tamed) {
+                const heart = scene.add.text(ch.x, ch.y - 18, '♥', {
+                    fontSize: '11px', color: '#ffaacc', stroke: '#000', strokeThickness: 2
+                }).setOrigin(0.5).setDepth(21);
+                ch.setData('tamedIcon', heart);
+            }
             ch.anims.play('chicken_idle', true);
             chickens.push(ch);
             return ch;
@@ -6452,6 +6793,12 @@
             for (let i = chickens.length - 1; i >= 0; i--) {
                 const ch = chickens[i];
                 if (!ch || !ch.active) { chickens.splice(i, 1); continue; }
+
+                // ♥アイコン位置更新
+                const chTamedIcon = ch.getData('tamedIcon');
+                if (chTamedIcon && chTamedIcon.active) {
+                    chTamedIcon.setPosition(ch.x, ch.y - 18);
+                }
 
                 // タイマー更新
                 const timer = ch.getData('timer') + delta;
@@ -6590,11 +6937,24 @@
             const sw = scene.scale.width;
             const sh = scene.scale.height;
             const panelW = Math.min(320, sw - 30);
-            const panelH = 110;
+
+            renjiDialog = scene.add.container(0, 0).setScrollFactor(0).setDepth(502);
+
+            // ── テキストを先に生成して実際の高さを取得 ──
+            const msgText = scene.add.text(0, 0, hint, {
+                fontSize: '12px', color: '#ddeeff',
+                wordWrap: { width: panelW - 28 }
+            }).setScrollFactor(0);
+
+            // テキスト高さに合わせてパネル高さを動的決定
+            const NAME_TAG_H = 32; // 名前タグ領域
+            const PADDING_B  = 14; // 下余白
+            const panelH = NAME_TAG_H + Math.ceil(msgText.height) + PADDING_B;
             const panelX = sw / 2 - panelW / 2;
             const panelY = sh - panelH - 60;
 
-            renjiDialog = scene.add.container(0, 0).setScrollFactor(0).setDepth(502);
+            // テキストを正しい位置へ移動
+            msgText.setPosition(panelX + 14, panelY + NAME_TAG_H);
 
             const bg = scene.add.rectangle(panelX + panelW / 2, panelY + panelH / 2, panelW, panelH, 0x0a1520, 0.93)
                 .setScrollFactor(0).setStrokeStyle(2, 0x44cccc);
@@ -6605,10 +6965,6 @@
             }).setScrollFactor(0);
             renjiDialog.add(nameTag);
 
-            const msgText = scene.add.text(panelX + 14, panelY + 30, hint, {
-                fontSize: '12px', color: '#ddeeff',
-                wordWrap: { width: panelW - 28 }
-            }).setScrollFactor(0);
             renjiDialog.add(msgText);
 
             const closeBtn = scene.add.text(panelX + panelW - 16, panelY + 10, '✕', {
@@ -7838,10 +8194,6 @@
                 updateInventoryLayout(width);
                 repositionBagButton(width);
 
-                if (craftButtonOpen) {
-                    craftButtonOpen.setPosition(width - margin - buttonRadius, height / 2);
-                    craftButtonOpenText.setPosition(width - margin - buttonRadius, height / 2);
-                }
                 if (craftPanel) {
                     craftPanel.setPosition(isCraftPanelOpen ? width : width + 250, 100);
                 }
@@ -9331,6 +9683,46 @@
                             const tamedText = scene.add.text(
                                 dg.x, dg.y - 30, 'なかまになった！',
                                 { fontSize: '14px', color: '#88aaff', stroke: '#000', strokeThickness: 3 }
+                            ).setOrigin(0.5).setDepth(200);
+                            scene.tweens.add({
+                                targets: tamedText, y: tamedText.y - 40, alpha: 0,
+                                duration: 2000, ease: 'Power2',
+                                onComplete: () => tamedText.destroy()
+                            });
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // === ニワトリへの小麦やり判定（1回で仲間化）===
+            if (validPointer.isDown) {
+                const holdingWheat = inventory[activeSlotIndex] && inventory[activeSlotIndex].type === BLOCK_TYPES.WHEAT && inventory[activeSlotIndex].count > 0;
+                if (holdingWheat) {
+                    for (const ch of chickens) {
+                        if (!ch.active || ch.getData('tamed')) continue;
+                        const chDist = Phaser.Math.Distance.Between(validPointer._worldPtX, validPointer._worldPtY, ch.x, ch.y);
+                        const playerChDist = Phaser.Math.Distance.Between(player.x, player.y, ch.x, ch.y);
+                        if (chDist < 30 && playerChDist < 60) {
+                            // 小麦を1つ消費
+                            inventory[activeSlotIndex].count--;
+                            if (inventory[activeSlotIndex].count <= 0) {
+                                inventory[activeSlotIndex] = { type: null, count: 0, texture: null };
+                            }
+                            updateInventoryUI();
+
+                            // 仲間化！
+                            ch.setData('tamed', true);
+                            const chCi = ch.getData('colorIndex') || 0;
+                            ch.setTint(CHICKEN_COLORS[chCi]);
+                            const chHeart = scene.add.text(ch.x, ch.y - 18, '♥', {
+                                fontSize: '11px', color: '#ffaacc', stroke: '#000', strokeThickness: 2
+                            }).setOrigin(0.5).setDepth(21);
+                            ch.setData('tamedIcon', chHeart);
+                            playSE('chicken_tamed');
+                            const tamedText = scene.add.text(
+                                ch.x, ch.y - 30, 'なかまになった！',
+                                { fontSize: '14px', color: '#ffccaa', stroke: '#000', strokeThickness: 3 }
                             ).setOrigin(0.5).setDepth(200);
                             scene.tweens.add({
                                 targets: tamedText, y: tamedText.y - 40, alpha: 0,

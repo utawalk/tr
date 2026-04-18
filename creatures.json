@@ -84,8 +84,8 @@
     "_comment": "ニワトリ（地上を歩き回り、定期的にたまごを産む）",
     "name": "ニワトリ",
     "desc": "地上をてくてく歩く鳥。しばらく待つと自動でたまごをくれる。",
-    "eggIntervalMin": 25000,
-    "eggIntervalMax": 60000,
+    "eggIntervalMin": 60000,
+    "eggIntervalMax": 90000,
     "walkSpeed": 40
   },
 
