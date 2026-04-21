@@ -1907,14 +1907,35 @@
                 const cols = Math.floor(worldWidth / blockSize);
                 const rows = Math.floor((worldHeight - groundY) / blockSize);
 
+                // === 地表でこぼこ生成 ===
+                // surfaceOffset[c] < 0 : 丘（groundYより上）, > 0 : 谷（groundYより下）
+                const MAX_TERRAIN_VAR = 4;
+                const surfaceOffset = new Array(cols).fill(0);
+                {
+                    const f1 = 1.5 + Math.random() * 2.0;
+                    const f2 = 5.0 + Math.random() * 5.0;
+                    const f3 = 13.0 + Math.random() * 8.0;
+                    const p1 = Math.random() * Math.PI * 2;
+                    const p2 = Math.random() * Math.PI * 2;
+                    const p3 = Math.random() * Math.PI * 2;
+                    for (let c = 0; c < cols; c++) {
+                        const t = c / Math.max(1, cols - 1);
+                        const h = Math.sin(t * Math.PI * f1 + p1) * 1.8
+                                + Math.sin(t * Math.PI * f2 + p2) * 1.1
+                                + Math.sin(t * Math.PI * f3 + p3) * 0.5;
+                        surfaceOffset[c] = Math.round(Math.max(-MAX_TERRAIN_VAR, Math.min(MAX_TERRAIN_VAR, h)));
+                    }
+                }
+
                 // === 空洞生成（セルラーオートマトン） ===
                 // 初期ランダムマップ: 1=壁, 0=空洞
                 let caveMap = [];
                 for (let r = 0; r < rows; r++) {
                     caveMap[r] = [];
                     for (let c = 0; c < cols; c++) {
-                        if (r === 0) {
-                            caveMap[r][c] = 1; // 地表は必ず壁
+                        const surf = Math.max(0, surfaceOffset[c]); // 地表行（谷は正の行、丘は0）
+                        if (r === 0 || r === surf || r === surf + 1) {
+                            caveMap[r][c] = 1; // 地表・直下は必ず壁
                         } else {
                             // 深さに応じて空洞率を変化（浅い所は少なめ、中層が多め）
                             const depthRatio = r / rows;
@@ -2031,20 +2052,27 @@
                 // === ブロック配置 ===
                 for (let r = 0; r < rows; r++) {
                     for (let c = 0; c < cols; c++) {
-                        const bx = c * blockSize + blockSize / 2;
-                        const by = groundY + r * blockSize + blockSize / 2;
+                        const surf = Math.max(0, surfaceOffset[c]); // この列の地表行（0以上）
+                        if (r < surf) continue; // 谷の空中部分はスキップ
 
                         // 空洞は何も置かない
                         if (caveMap[r][c] === 0) continue;
 
+                        const bx = c * blockSize + blockSize / 2;
+                        const by = groundY + r * blockSize + blockSize / 2;
+
                         let typeId;
-                        if (r === 0) {
+                        if (r === surf && surfaceOffset[c] >= 0) {
+                            // 平地・谷の列のみここで草ブロックを置く
+                            // 丘の列（surfaceOffset < 0）は別ループで groundY より上に草を配置済みなので
+                            // r=0 は地下扱いにして草ブロックにしない
                             typeId = BLOCK_TYPES.GRASS;
                         } else if (ironVeinMap[r][c]) {
                             // 鉄鉱脈ゾーン
                             typeId = BLOCK_TYPES.IRON;
                         } else {
-                            const depth = r;
+                            // 地表からの実際の深さ（丘は surfaceOffset が負なのでそちらを使う）
+                            const depth = r - surfaceOffset[c];
                             if (depth >= 2 && Math.random() < 0.3 + (depth * 0.05)) {
                                 const roll = Math.random();
                                 if (depth >= 15 && roll < 0.008) {
@@ -2063,6 +2091,21 @@
                         const newBlock = platforms.create(bx, by, bData.texture, bData.frame);
                         newBlock.setData('typeId', typeId);
                         newBlock.setData('hp', bData.hp);
+                    }
+                }
+
+                // === 丘ブロック配置（groundYより上の地形）===
+                for (let c = 0; c < cols; c++) {
+                    if (surfaceOffset[c] >= 0) continue; // 丘でない列はスキップ
+                    const surf = surfaceOffset[c]; // 負の値（丘の高さ）
+                    for (let r = surf; r < 0; r++) {
+                        const bx = c * blockSize + blockSize / 2;
+                        const by = groundY + r * blockSize + blockSize / 2;
+                        const typeId = (r === surf) ? BLOCK_TYPES.GRASS : BLOCK_TYPES.DIRT;
+                        const bData = BLOCK_DATA[typeId];
+                        const nb = platforms.create(bx, by, bData.texture, bData.frame);
+                        nb.setData('typeId', typeId);
+                        nb.setData('hp', bData.hp);
                     }
                 }
 
@@ -2236,6 +2279,9 @@
                     pondPositions.push(pc);
                     const pondW = 3 + Math.floor(Math.random() * 4); // 幅3〜6
                     const pondDepth = 2 + Math.floor(Math.random() * 2); // 深さ2〜3
+                    // 池中心列の地表Y座標を基準にする（でこぼこ地形対応）
+                    const pondSurfOff = Math.max(0, surfaceOffset[pc] || 0);
+                    const pondBaseY = groundY + pondSurfOff * blockSize;
 
                     // 1) 池の底と左右壁を確保
                     for (let dc = -1; dc <= pondW; dc++) {
@@ -2243,12 +2289,12 @@
                         if (cc < 0 || cc >= cols) continue;
                         const gx = cc * blockSize + blockSize / 2;
                         // 底面: pondDepth+1の深さに土を確保
-                        const bottomY = groundY + (pondDepth + 1) * blockSize + blockSize / 2;
+                        const bottomY = pondBaseY + (pondDepth + 1) * blockSize + blockSize / 2;
                         ensureSolidAt(gx, bottomY);
                         // 左右の壁
                         if (dc === -1 || dc === pondW) {
                             for (let d = 0; d <= pondDepth; d++) {
-                                const wallY = groundY + d * blockSize + blockSize / 2;
+                                const wallY = pondBaseY + d * blockSize + blockSize / 2;
                                 ensureSolidAt(gx, wallY);
                             }
                         }
@@ -2263,12 +2309,12 @@
                         const distFromEdge = Math.min(dc, pondW - 1 - dc);
                         const localDepth = distFromEdge === 0 ? Math.max(1, pondDepth - 1) : pondDepth;
                         for (let d = 0; d <= localDepth; d++) {
-                            const wy = groundY + d * blockSize + blockSize / 2;
+                            const wy = pondBaseY + d * blockSize + blockSize / 2;
                             removeBlockAt(gx, wy);
                             placeWater(null, gx, wy);
                         }
                         // localDepthの下に底を確保
-                        const btmY = groundY + (localDepth + 1) * blockSize + blockSize / 2;
+                        const btmY = pondBaseY + (localDepth + 1) * blockSize + blockSize / 2;
                         ensureSolidAt(gx, btmY);
                     }
                 }
@@ -2307,14 +2353,14 @@
                     // 幹の高さ: 3～6ブロック
                     const trunkHeight = 3 + Math.floor(Math.random() * 4);
                     const baseX = x + blockSize / 2;
-                    // ループが h=1 始まりなので、h=1 のとき草ブロック(Y=groundY+blockSize/2)の
-                    // 真上(760)に来るよう baseY = groundY + blockSize/2 に設定する
-                    const baseY = groundY + blockSize / 2;
+                    // 地形でこぼこ対応: この列の実際の草ブロックY座標を使用
+                    const _tc = Math.floor(x / blockSize);
+                    const baseY = groundY + surfaceOffset[_tc] * blockSize + blockSize / 2;
 
                     // 池の上には木を生成しない
                     let onWater = false;
                     platforms.getChildren().forEach(b => {
-                        if (b.active && Math.abs(b.x - baseX) < 4 && Math.abs(b.y - (groundY + blockSize / 2)) < 4
+                        if (b.active && Math.abs(b.x - baseX) < 4 && Math.abs(b.y - baseY) < 4
                             && b.getData('typeId') === BLOCK_TYPES.WATER) onWater = true;
                     });
                     if (onWater) continue;
@@ -2379,19 +2425,28 @@
                 }
             }
 
+            // 以下は新規ワールド生成時のみ実行（セーブロード時はスキップ）
+            if (!_saveData || !_saveData.blocks) {
+
                 // === 地表に雑草・花を生成 ===
                 for (let x = 0; x < worldWidth; x += blockSize) {
                     const roll = Math.random();
                     if (roll > 0.25) continue; // 25%の確率で何か生やす
                     const baseX = x + blockSize / 2;
-                    const baseY = groundY - blockSize / 2; // 草ブロックのすぐ上
+                    // 地形でこぼこ対応: 実際の草ブロックY座標をスキャンして取得
+                    let _grassY = groundY + blockSize / 2; // デフォルト
+                    platforms.getChildren().forEach(b => {
+                        if (!b.active) return;
+                        if (Math.abs(b.x - baseX) < 4 && b.getData('typeId') === BLOCK_TYPES.GRASS) _grassY = b.y;
+                    });
+                    const baseY = _grassY - blockSize; // 草ブロックのすぐ上
                     // 既に木の幹がある場所、または下が水の場所はスキップ
                     let occupied = false;
                     platforms.getChildren().forEach(b => {
                         if (!b.active) return;
                         if (Math.abs(b.x - baseX) < 4 && Math.abs(b.y - baseY) < 4) occupied = true;
                         // 下のブロックが水ならスキップ
-                        if (Math.abs(b.x - baseX) < 4 && Math.abs(b.y - (groundY + blockSize / 2)) < 4
+                        if (Math.abs(b.x - baseX) < 4 && Math.abs(b.y - _grassY) < 4
                             && b.getData('typeId') === BLOCK_TYPES.WATER) occupied = true;
                     });
                     if (occupied) continue;
@@ -2606,23 +2661,68 @@
                     return null;
                 }
 
-                // 通常の家を3～4棟
-                const _normalHouseCount = 3 + Math.floor(Math.random() * 2);
-                for (let i = 0; i < _normalHouseCount; i++) {
-                    const hx = tryPickHouseX();
-                    if (hx !== null) placeSmallHouse(hx, hGetSurfY(hx), false);
-                }
-
-                // 廃墟を3～4棟
-                const _ruinCount = 3 + Math.floor(Math.random() * 2);
-                for (let i = 0; i < _ruinCount; i++) {
+                // 地表には廃屋を1棟だけ（通常の家は建てない）
+                {
                     const hx = tryPickHouseX();
                     if (hx !== null) placeSmallHouse(hx, hGetSurfY(hx), true);
+                }
+
+                // ── 地下の家・廃屋を探して配置 ──
+                // 洞窟の床（実ブロック）の上に家が入るだけの空間がある位置を探す
+                const _ugUsedPos = [];
+                function tryFindUnderground(usedPos) {
+                    const NEED_H  = 7;   // 家の最大高さ（ブロック数）
+                    const NEED_W  = 9;   // 確認幅（家幅7 + 左右余白1ずつ）
+                    const LEFT_M  = 4;   // 左端へのオフセット（中心から4ブロック左）
+                    const minDepY = groundY + blockSize * 12 + blockSize / 2; // 深さ最小12行
+                    const maxDepY = groundY + blockSize * 75 + blockSize / 2; // 深さ最大75行
+                    for (let att = 0; att < 300; att++) {
+                        // ランダムなX列を選ぶ
+                        const px = blockSize * 25 + Math.floor(Math.random() * (worldWidth - blockSize * 50));
+                        const cx = Math.round(px / blockSize) * blockSize + blockSize / 2;
+                        if (usedPos.some(p => Math.abs(p - cx) < 500)) continue;
+                        // この列を上から下へスキャンして適切な洞窟床を探す
+                        for (let fy = minDepY; fy <= maxDepY; fy += blockSize) {
+                            const fb0 = bkGetAt(cx, fy);
+                            if (!fb0 || !fb0.body || !fb0.body.enable) continue;
+                            // 家の幅全体について: 床あり＋上方向NEED_H行が空洞か確認
+                            const x0 = cx - LEFT_M * blockSize;
+                            let ok = true;
+                            for (let dc = 0; dc < NEED_W && ok; dc++) {
+                                const bx = x0 + dc * blockSize;
+                                if (bx < blockSize * 3 || bx > worldWidth - blockSize * 3) { ok = false; break; }
+                                const fb = bkGetAt(bx, fy);
+                                if (!fb || !fb.body || !fb.body.enable) { ok = false; break; }
+                                for (let h = 1; h <= NEED_H && ok; h++) {
+                                    const ob = bkGetAt(bx, fy - h * blockSize);
+                                    if (ob && ob.body && ob.body.enable) ok = false;
+                                }
+                            }
+                            if (!ok) continue;
+                            usedPos.push(cx);
+                            return { centerX: cx, surfY: fy }; // surfY = 洞窟床ブロックのY中心
+                        }
+                    }
+                    return null;
+                }
+
+                // 地下に通常の家を2〜3棟
+                const _ugNormalCount = 2 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < _ugNormalCount; i++) {
+                    const pos = tryFindUnderground(_ugUsedPos);
+                    if (pos) placeSmallHouse(pos.centerX, pos.surfY, false);
+                }
+                // 地下に廃屋を3〜4棟
+                const _ugRuinCount = 3 + Math.floor(Math.random() * 2);
+                for (let i = 0; i < _ugRuinCount; i++) {
+                    const pos = tryFindUnderground(_ugUsedPos);
+                    if (pos) placeSmallHouse(pos.centerX, pos.surfY, true);
                 }
             }
             } catch(e) {
                 console.warn('[HouseGen] 家生成エラーをスキップ:', e);
             }
+            } // end: 新規ワールド生成時のみ
             // ============================================================
 
             // プレイヤーアニメーションの作成（各レイヤー用）
@@ -2691,7 +2791,7 @@
 
             // プレイヤーの配置（物理用 - 透明にする）
             const _safeSpawnX = _saveData ? (worldWidth / 2) : findSafeSpawnX(worldWidth / 2);
-            player = this.physics.add.sprite(_safeSpawnX, groundY - 100, 'player');
+            player = this.physics.add.sprite(_safeSpawnX, groundY - 200, 'player'); // でこぼこ地形対応で余裕を持たせる
             player.setAlpha(0); // 物理ボディ用なので非表示
             player.setDepth(10);
             player.body.setSize(28, 48);   // 28px幅: 2ブロック(32px)の隙間で確実に落下
@@ -4835,36 +4935,76 @@
                 { color: 0xffffff, name: 'シルバー',     rarity: 'レジェンド'  }
             ];
 
+            // うさぎレア度：白/グレー=コモン, 茶/クリーム=アンコモン, 黒=レア
+            const rabbitRarities = ['コモン', 'コモン', 'アンコモン', 'レア', 'アンコモン'];
             const rabbitEntries = rColors.map(function(col, i) {
                 return { id: 'rabbit_' + i, name: rabbitInfo.name + '（' + (rColorNames[i] || i) + '）',
-                         desc: rabbitInfo.desc, texture: 'rabbit', frame: 0, tint: col, category: 'animal' };
+                         desc: rabbitInfo.desc, texture: 'rabbit', frame: 0, tint: col, category: 'animal',
+                         rarity: rabbitRarities[i] || 'コモン' };
             });
+            // 犬レア度：茶/クリーム=コモン, ゴールデン/グレー=アンコモン, 黒=レア
+            const dogRarities = ['コモン', 'アンコモン', 'アンコモン', 'レア', 'コモン'];
             const dogEntries = dColors.map(function(col, i) {
                 return { id: 'dog_' + i, name: dogInfo.name + '（' + (dColorNames[i] || i) + '）',
-                         desc: dogInfo.desc, texture: 'dog', frame: 0, tint: col, category: 'animal' };
+                         desc: dogInfo.desc, texture: 'dog', frame: 0, tint: col, category: 'animal',
+                         rarity: dogRarities[i] || 'コモン' };
             });
+            // ニワトリレア度：白/黄=コモン, オレンジ/クリーム=アンコモン, グレー=レア
+            const chickenRarities = ['コモン', 'コモン', 'アンコモン', 'アンコモン', 'レア'];
             const chickenEntries = cColors.map(function(col, i) {
                 return { id: 'chicken_' + i, name: chickenInfo.name + '（' + (cColorNames[i] || i) + '）',
-                         desc: chickenInfo.desc, texture: 'chicken', frame: 0, tint: col, category: 'animal' };
+                         desc: chickenInfo.desc, texture: 'chicken', frame: 0, tint: col, category: 'animal',
+                         rarity: chickenRarities[i] || 'コモン' };
             });
             const alienEntries = alienColorList.map(function(c, i) {
                 return { id: 'alien_' + i, name: customerInfo.name + '（' + c.name + '）',
-                         desc: customerInfo.desc + ' レア度：' + c.rarity,
-                         texture: 'alien', frame: 0, tint: c.color, category: 'creature' };
+                         desc: customerInfo.desc,
+                         texture: 'alien', frame: 0, tint: c.color, category: 'creature',
+                         rarity: c.rarity };
             });
 
+            // 鳥レア度
+            const birdRarityMap = { bird0: 'コモン', bird1: 'アンコモン', bird2: 'アンコモン', bird3: 'レア', bird4: 'スーパーレア' };
+
             return [
-                { id: 'merchant', name: merchantInfo.name, desc: merchantInfo.desc, texture: 'merchant', frame: 0, tint: null, category: 'human' },
-                { id: 'renji',    name: renjiInfo.name,    desc: renjiInfo.desc,    texture: 'renji',    frame: 0, tint: null, category: 'creature' },
-                { id: 'slime',    name: slimeInfo.name,    desc: slimeInfo.desc,    texture: 'slime',    frame: 0, tint: null, category: 'creature' },
+                { id: 'merchant', name: merchantInfo.name, desc: merchantInfo.desc, texture: 'merchant', frame: 0, tint: null, category: 'human',   rarity: 'コモン'    },
+                { id: 'renji',    name: renjiInfo.name,    desc: renjiInfo.desc,    texture: 'renji',    frame: 0, tint: null, category: 'creature', rarity: '？（不明）' },
+                { id: 'slime',    name: slimeInfo.name,    desc: slimeInfo.desc,    texture: 'slime',    frame: 0, tint: null, category: 'creature', rarity: 'コモン'    },
             ]
             .concat(alienEntries)
             .concat(rabbitEntries)
             .concat(dogEntries)
             .concat(chickenEntries)
             .concat(birdSpecies.map(function(sp) {
-                return { id: sp.id, name: sp.name, desc: sp.desc, texture: sp.id, frame: 0, tint: null, category: 'animal' };
+                return { id: sp.id, name: sp.name, desc: sp.desc, texture: sp.id, frame: 0, tint: null, category: 'animal',
+                         rarity: birdRarityMap[sp.id] || 'コモン' };
             }));
+        }
+
+        // === レア度ヘルパー ===
+        const RARITY_STYLE = {
+            'コモン':       { color: '#aaaaaa', hex: 0x999999, stars: 1 },
+            'アンコモン':   { color: '#44cc44', hex: 0x44cc44, stars: 2 },
+            'レア':         { color: '#4488ff', hex: 0x4488ff, stars: 3 },
+            'スーパーレア': { color: '#cc44ff', hex: 0xcc44ff, stars: 4 },
+            'ウルトラレア': { color: '#ffaa00', hex: 0xffaa00, stars: 5 },
+            'レジェンド':   { color: '#ff6644', hex: 0xff6644, stars: 6 },
+            '？（不明）':   { color: '#888888', hex: 0x888888, stars: 0 },
+        };
+        function getRarityColor(rarity) {
+            return (RARITY_STYLE[rarity] || RARITY_STYLE['コモン']).color;
+        }
+        function getRarityHex(rarity) {
+            return (RARITY_STYLE[rarity] || RARITY_STYLE['コモン']).hex;
+        }
+        // "★★★☆☆☆" 形式の文字列を返す（最大6個、未満は☆で埋める）
+        function getRarityStars(rarity) {
+            const style = RARITY_STYLE[rarity];
+            if (!style) return '★';
+            if (style.stars === 0) return '？';
+            const filled = '★'.repeat(style.stars);
+            const empty  = '☆'.repeat(6 - style.stars);
+            return filled + empty;
         }
         // creatures.json 読み込み前はデフォルト値で初期化、applyCreatureData() で上書き
         let CREATURE_BOOK = buildCreatureBook(null);
@@ -5146,8 +5286,9 @@
             const detailCX = detailAreaL + detailAreaW / 2;
             const detailImgY = contentTop + Math.min(60, contentH * 0.15);
             const detailImgSize = Math.min(72, detailAreaW - 16, contentH * 0.3);
-            const detailNameY = detailImgY + detailImgSize / 2 + 10;
-            const detailDescY = detailNameY + 28;
+            const detailNameY   = detailImgY + detailImgSize / 2 + 10;
+            const detailRarityY = detailNameY + 22;
+            const detailDescY   = detailNameY + 44;
 
             const detailBg = scene.add.rectangle(
                 detailAreaL + detailAreaW / 2, contentTop + contentH / 2,
@@ -5172,6 +5313,12 @@
             }).setOrigin(0.5, 0).setScrollFactor(0).setVisible(false);
             creatureBookOverlay.add(detailName);
 
+            // レア度表示
+            const detailRarity = scene.add.text(detailCX, detailRarityY, '', {
+                fontSize: '13px', color: '#aaaaaa', fontStyle: 'bold', align: 'center', letterSpacing: 2
+            }).setOrigin(0.5, 0).setScrollFactor(0).setVisible(false);
+            creatureBookOverlay.add(detailRarity);
+
             const detailDesc = scene.add.text(detailAreaL + 6, detailDescY, '', {
                 fontSize: '11px', color: '#aaccaa', align: 'left',
                 wordWrap: { width: detailAreaW - 16, useAdvancedWrap: true }
@@ -5182,16 +5329,19 @@
                 selectedEntry = entry;
                 detailPlaceholder.setVisible(false);
                 const known = encounteredCreatures.has(entry.id);
+                const rCol = getRarityColor(entry.rarity || 'コモン');
                 if (known) {
                     detailImg.setTexture(entry.texture, entry.frame);
                     if (entry.tint != null) detailImg.setTint(entry.tint);
                     else detailImg.clearTint();
                     detailImg.setDisplaySize(detailImgSize, detailImgSize).setVisible(true);
                     detailName.setText(entry.name).setStyle({ color: '#aaffcc' }).setVisible(true);
+                    detailRarity.setText(getRarityStars(entry.rarity || 'コモン')).setStyle({ color: rCol }).setVisible(true);
                     detailDesc.setText(entry.desc).setVisible(true);
                 } else {
                     detailImg.setVisible(false);
                     detailName.setText('???').setStyle({ color: '#556655' }).setVisible(true);
+                    detailRarity.setText(getRarityStars(entry.rarity || 'コモン')).setStyle({ color: rCol }).setVisible(true);
                     detailDesc.setText('まだ出会っていない生き物です。\n近づくと図鑑に登録されます！').setVisible(true);
                 }
             }
@@ -5221,17 +5371,27 @@
                     gridContainer.add(cellBg);
 
                     if (known) {
-                        const icon = scene.add.image(cx, cy, entry.texture, entry.frame)
+                        const icon = scene.add.image(cx, cy - 3, entry.texture, entry.frame)
                             .setDisplaySize(iconSize, iconSize).setScrollFactor(0);
                         if (entry.tint != null) icon.setTint(entry.tint);
                         gridContainer.add(icon);
                     } else {
-                        const qmark = scene.add.text(cx, cy, '?', {
+                        const qmark = scene.add.text(cx, cy - 3, '?', {
                             fontSize: Math.max(14, iconSize - 4) + 'px',
                             color: '#334433', fontStyle: 'bold'
                         }).setOrigin(0.5).setScrollFactor(0);
                         gridContainer.add(qmark);
                     }
+
+                    // レア度カラーバー（セル下部）
+                    const rarityHex = getRarityHex(entry.rarity || 'コモン');
+                    const barH = 4;
+                    const barY = cy + (cellSize - 2) / 2 - barH / 2 - 1;
+                    const barW = cellSize - 8;
+                    const rarityBar = scene.add.graphics().setScrollFactor(0);
+                    rarityBar.fillStyle(rarityHex, 0.85);
+                    rarityBar.fillRoundedRect(cx - barW / 2, barY, barW, barH, 2);
+                    gridContainer.add(rarityBar);
 
                     cellBg.on('pointerdown', () => {
                         playSE('ui_click');
@@ -5262,6 +5422,7 @@
                 } else {
                     detailImg.setVisible(false);
                     detailName.setVisible(false);
+                    detailRarity.setVisible(false);
                     detailDesc.setVisible(false);
                     detailPlaceholder.setVisible(true);
                 }
@@ -5555,8 +5716,6 @@
                     isCraftPanelOpen = !isCraftPanelOpen;
                     craftPanel.setX(isCraftPanelOpen ? scene.scale.width : scene.scale.width + 250);
                 }},
-                { icon: '💾',  label: 'セーブ',      color: 0x165c28, isSave: true },
-                { icon: '🗑',  label: 'データ削除',  color: 0x6a1010, isDel: true },
                 { icon: '📖',  label: 'アイテム図鑑', color: 0x10206a, action: () => {
                     isMenuOpen = false; menuPanel.setVisible(false);
                     openEncyclopedia(scene);
@@ -5576,13 +5735,13 @@
                     else player.setPosition(3000, 668);
                     player.setVelocity(0, 0);
                 }},
-                { icon: '❓',  label: '操作方法',    color: 0x2a2a2a, action: () => {
-                    isMenuOpen = false; menuPanel.setVisible(false);
-                    openHelpScreen(scene);
-                }},
                 { icon: '🏆',  label: '実績',        color: 0x4a2800, action: () => {
                     isMenuOpen = false; menuPanel.setVisible(false);
                     openAchievementsScreen(scene);
+                }},
+                { icon: '⚙',  label: 'オプション',  color: 0x2a3a5a, action: () => {
+                    isMenuOpen = false; menuPanel.setVisible(false);
+                    openOptionsScreen(scene);
                 }},
             ];
 
@@ -5749,6 +5908,178 @@
                     });
                 }
             });
+        }
+
+        // === オプション画面 ===
+        let optionsOverlay = null;
+        let isOptionsOpen = false;
+
+        function openOptionsScreen(scene) {
+            if (optionsOverlay) return;
+            isOptionsOpen = true;
+            isMenuOpen = false;
+            menuPanel.setVisible(false);
+
+            optionsOverlay = scene.add.container(0, 0).setScrollFactor(0).setDepth(400);
+
+            const sw = scene.scale.width;
+            const sh = scene.scale.height;
+
+            // 半透明暗幕
+            const dimBg = scene.add.rectangle(sw / 2, sh / 2, sw, sh, 0x000000, 0.70)
+                .setScrollFactor(0).setInteractive();
+            dimBg.on('pointerdown', () => { closeOptionsScreen(); });
+            optionsOverlay.add(dimBg);
+
+            const panelW = Math.min(320, sw - 40);
+            const panelH = 280;
+            const px = sw / 2;
+            const py = sh / 2;
+
+            // パネル背景
+            const panelBg = scene.add.graphics().setScrollFactor(0);
+            panelBg.fillStyle(0x111820, 0.97);
+            panelBg.fillRoundedRect(px - panelW/2, py - panelH/2, panelW, panelH, 16);
+            panelBg.lineStyle(1.5, 0x3366cc, 0.65);
+            panelBg.strokeRoundedRect(px - panelW/2, py - panelH/2, panelW, panelH, 16);
+            panelBg.fillStyle(0x2244aa, 0.14);
+            panelBg.fillRoundedRect(px - panelW/2, py - panelH/2, panelW, 42, { tl:16, tr:16, bl:0, br:0 });
+            panelBg.setInteractive(
+                new Phaser.Geom.Rectangle(px - panelW/2, py - panelH/2, panelW, panelH),
+                Phaser.Geom.Rectangle.Contains
+            );
+            panelBg.on('pointerdown', () => {});
+            optionsOverlay.add(panelBg);
+
+            // タイトル
+            const titleText = scene.add.text(px, py - panelH/2 + 20, 'OPTIONS', {
+                fontSize: '15px', color: '#889abb', fontStyle: 'bold', letterSpacing: 3
+            }).setOrigin(0.5, 0.5).setScrollFactor(0);
+            optionsOverlay.add(titleText);
+
+            // 閉じるボタン
+            const closeBtn = scene.add.text(px + panelW/2 - 18, py - panelH/2 + 20, '✕', {
+                fontSize: '16px', color: '#667799', fontStyle: 'bold'
+            }).setOrigin(0.5).setScrollFactor(0).setInteractive({ useHandCursor: true });
+            closeBtn.on('pointerover', () => closeBtn.setColor('#aaccff'));
+            closeBtn.on('pointerout',  () => closeBtn.setColor('#667799'));
+            closeBtn.on('pointerdown', () => { playSE('ui_click'); closeOptionsScreen(); });
+            optionsOverlay.add(closeBtn);
+
+            // セパレータ
+            const sep = scene.add.graphics().setScrollFactor(0);
+            sep.lineStyle(1, 0x334466, 0.6);
+            sep.lineBetween(px - panelW/2 + 14, py - panelH/2 + 40, px + panelW/2 - 14, py - panelH/2 + 40);
+            optionsOverlay.add(sep);
+
+            // --- ボタン共通設定 ---
+            const btnW   = panelW - 40;
+            const btnH   = 48;
+            const btnX   = px;
+            const startY = py - panelH/2 + 68;
+            const btnGap = 58;
+
+            const OPT_ITEMS = [
+                { icon: '💾', label: 'セーブ',     color: 0x165c28, isSave: true },
+                { icon: '🗑', label: 'データを消す', color: 0x6a1010, isDel: true },
+                { icon: '❓', label: '操作説明',    color: 0x2a2a2a, action: () => {
+                    closeOptionsScreen();
+                    openHelpScreen(scene);
+                }},
+            ];
+
+            let deleteConfirmOpt = false;
+
+            OPT_ITEMS.forEach((item, i) => {
+                const by = startY + i * btnGap;
+
+                // ボタン背景
+                const btnGfx = scene.add.graphics().setScrollFactor(0);
+                const drawBtn = (color, bright) => {
+                    btnGfx.clear();
+                    const c = bright
+                        ? Phaser.Display.Color.IntegerToColor(color).brighten(30).color32
+                        : color;
+                    btnGfx.fillStyle(c, 1);
+                    btnGfx.fillRoundedRect(btnX - btnW/2, by - btnH/2, btnW, btnH, 10);
+                    btnGfx.fillStyle(0xffffff, 0.08);
+                    btnGfx.fillRoundedRect(btnX - btnW/2 + 3, by - btnH/2 + 3, btnW - 6, btnH/2 - 4, { tl:7, tr:7, bl:0, br:0 });
+                    btnGfx.lineStyle(1, 0xffffff, 0.13);
+                    btnGfx.strokeRoundedRect(btnX - btnW/2, by - btnH/2, btnW, btnH, 10);
+                };
+                drawBtn(item.color, false);
+                btnGfx.setInteractive(
+                    new Phaser.Geom.Rectangle(btnX - btnW/2, by - btnH/2, btnW, btnH),
+                    Phaser.Geom.Rectangle.Contains
+                );
+                optionsOverlay.add(btnGfx);
+
+                // アイコン
+                const iconTxt = scene.add.text(btnX - btnW/2 + 28, by, item.icon, { fontSize: '22px' })
+                    .setOrigin(0.5).setScrollFactor(0);
+                optionsOverlay.add(iconTxt);
+
+                // ラベル
+                const lblTxt = scene.add.text(btnX - btnW/2 + 56, by, item.label, {
+                    fontSize: '15px', color: '#ccddf0', fontStyle: 'bold'
+                }).setOrigin(0, 0.5).setScrollFactor(0);
+                optionsOverlay.add(lblTxt);
+
+                // ホバー
+                btnGfx.on('pointerover', () => { if (!item.isDel || !deleteConfirmOpt) drawBtn(item.color, true); });
+                btnGfx.on('pointerout',  () => { if (!item.isDel || !deleteConfirmOpt) drawBtn(item.color, false); });
+
+                // クリック処理
+                if (item.isDel) {
+                    btnGfx.on('pointerdown', () => {
+                        if (!deleteConfirmOpt) {
+                            playSE('ui_error');
+                            deleteConfirmOpt = true;
+                            iconTxt.setText('⚠');
+                            lblTxt.setText('本当に消しますか？');
+                            drawBtn(0x991111, false);
+                            scene.time.delayedCall(3000, () => {
+                                if (deleteConfirmOpt) {
+                                    deleteConfirmOpt = false;
+                                    iconTxt.setText('🗑');
+                                    lblTxt.setText('データを消す');
+                                    drawBtn(item.color, false);
+                                }
+                            });
+                        } else {
+                            playSE('ui_success');
+                            closeOptionsScreen();
+                            resetGame(scene);
+                            deleteConfirmOpt = false;
+                        }
+                    });
+                } else if (item.isSave) {
+                    btnGfx.on('pointerdown', () => {
+                        playSE('ui_success');
+                        saveGame(scene);
+                        drawBtn(0x22aa44, false);
+                        iconTxt.setText('✅');
+                        lblTxt.setText('セーブしました！');
+                        scene.time.delayedCall(900, () => {
+                            drawBtn(item.color, false);
+                            iconTxt.setText('💾');
+                            lblTxt.setText('セーブ');
+                        });
+                    });
+                } else {
+                    btnGfx.on('pointerdown', () => {
+                        playSE('ui_click');
+                        item.action();
+                    });
+                }
+            });
+        }
+
+        function closeOptionsScreen() {
+            if (!optionsOverlay) return;
+            isOptionsOpen = false;
+            optionsOverlay.destroy();
+            optionsOverlay = null;
         }
 
         // === 操作方法画面 ===
@@ -7469,6 +7800,8 @@
             ch.setData('paused', false);
             ch.setData('tamed', !!tamed);
             ch.setData('tamedIcon', null);
+            ch.setData('lastSafeX', x); // 最後に安全に立っていたX座標
+            ch.setData('lastSafeY', y); // 最後に安全に立っていたY座標
             const ci = Math.floor(Math.random() * CHICKEN_COLORS.length);
             ch.setTint(CHICKEN_COLORS[ci]);
             ch.setData('colorIndex', ci);
@@ -7489,6 +7822,15 @@
             for (let i = chickens.length - 1; i >= 0; i--) {
                 const ch = chickens[i];
                 if (!ch || !ch.active) { chickens.splice(i, 1); continue; }
+
+                // ===== ブロック内埋まりチェック =====
+                const chUnstuck = findUnstuckPos(ch);
+                if (chUnstuck) {
+                    ch.setPosition(chUnstuck.x, chUnstuck.y);
+                    ch.body.reset(chUnstuck.x, chUnstuck.y);
+                    ch.body.setVelocityX(0);
+                    ch.body.setVelocityY(0);
+                }
 
                 // ♥アイコン位置更新
                 const chTamedIcon = ch.getData('tamedIcon');
@@ -7525,12 +7867,18 @@
                     }
                 }
 
-                // ===== マップ外落下チェック =====
-                // 地面より BLOCK_SIZE*6 以上下に落ちたらプレイヤー近くの安全な地表にテレポート
-                if (ch.y > WORLD_GROUND_Y + BLOCK_SIZE * 6 && _findSafeRabbitPos) {
-                    const safePos = _findSafeRabbitPos(200);
-                    ch.setPosition(safePos.x, safePos.y);
-                    ch.body.reset(safePos.x, safePos.y);
+                // ===== 地下落下チェック =====
+                // 地面より BLOCK_SIZE*5 以上下に落ちたら「最後の安全地点」に戻す
+                if (ch.y > WORLD_GROUND_Y + BLOCK_SIZE * 5) {
+                    const lsx = ch.getData('lastSafeX');
+                    const lsy = ch.getData('lastSafeY');
+                    const rx = (lsx != null) ? lsx : ch.x;
+                    const ry = (lsy != null) ? lsy : (WORLD_GROUND_Y - BLOCK_SIZE * 2);
+                    ch.setPosition(rx, ry);
+                    ch.body.reset(rx, ry);
+                    ch.body.setVelocityX(0);
+                    ch.body.setVelocityY(0);
+                    continue;
                 }
 
                 // 歩行 AI（ランダムウォーク）
@@ -7546,20 +7894,46 @@
                 if (paused || !ch.body.blocked.down) {
                     ch.body.setVelocityX(0);
                     ch.anims.play('chicken_idle', true);
+
+                    // 空中で地面より下にいる場合（洞窟の穴に落ち始めた）→ 進行方向を反転して引き戻す
+                    if (!ch.body.blocked.down && ch.y > WORLD_GROUND_Y) {
+                        const _dir = ch.getData('dir');
+                        ch.setData('dir', -_dir);
+                        ch.body.setVelocityX(-_dir * 60);
+                    }
                 } else {
                     let dir = ch.getData('dir');
 
-                    // 崖端検出: 進行方向の1ブロック先に足場がなければ反転
+                    // 地面に着いている間、安全地点を更新
+                    if (ch.y <= WORLD_GROUND_Y + BLOCK_SIZE * 2) {
+                        ch.setData('lastSafeX', ch.x);
+                        ch.setData('lastSafeY', ch.y);
+                    }
+
+                    // 崖端検出: 進行方向の0～3ブロック先を多段チェック（bodyHalfを使わず足元から計測）
                     const bsC = BLOCK_SIZE;
-                    const aheadX = ch.x + dir * (11 + bsC);          // 体の端 + 1ブロック先
-                    const belowY = ch.y + bsC * 1.5;                  // 足元の1ブロック下
-                    const groundAhead = bkGetAt(
-                        Math.round(aheadX / bsC) * bsC,
+                    const belowY1 = ch.y + bsC * 1.5; // 1段下
+                    const belowY2 = ch.y + bsC * 2.5; // 2段下（急な崖も検出）
+
+                    // 足元の端から0・1・2・3ブロック先の足場を確認
+                    const hasGround = (aheadDist, belowY) => !!bkGetAt(
+                        Math.round((ch.x + dir * aheadDist) / bsC) * bsC,
                         Math.round(belowY / bsC) * bsC
                     );
-                    if (!groundAhead) {
+                    // 足元（aheadDist=8）～3ブロック先まで段階的に確認
+                    const cliff0 = !hasGround(8,           belowY1);  // ほぼ真下（踏み外し直前）
+                    const cliff1 = !hasGround(bsC,         belowY1) && !hasGround(bsC,     belowY2);
+                    const cliff2 = !hasGround(bsC * 2,     belowY1) && !hasGround(bsC * 2, belowY2);
+                    const cliff3 = !hasGround(bsC * 3,     belowY1);
+
+                    if (cliff0 || cliff1 || cliff2 || cliff3) {
                         dir = -dir;
                         ch.setData('dir', dir);
+                        // 少し後退して崖から離れる
+                        ch.body.setVelocityX(dir * 60);
+                        ch.setFlipX(dir < 0);
+                        ch.anims.play('chicken_walk', true);
+                        continue;
                     }
 
                     ch.body.setVelocityX(dir * 40);
@@ -7745,6 +8119,32 @@
             return sl;
         }
 
+        // エンティティがブロックの内部に埋まっているか確認し、埋まっていれば上方向の空き位置を返す
+        // 安全な位置が見つかれば {x, y} を返す。見つからなければ null
+        function findUnstuckPos(entity) {
+            const bsC = BLOCK_SIZE;
+            const cx = Math.round(entity.x / bsC) * bsC;
+            // 体の上部・中央・下部それぞれでブロック内かチェック
+            const checkPoints = [entity.y, entity.y - bsC * 0.5, entity.y + bsC * 0.5];
+            let stuck = false;
+            for (const cy of checkPoints) {
+                const by = Math.round(cy / bsC) * bsC;
+                const blk = bkGetAt(cx, by);
+                if (blk && blk.body && blk.body.enable) { stuck = true; break; }
+            }
+            if (!stuck) return null;
+            // 上方向に空きを探す（最大12ブロック）
+            for (let d = 1; d <= 12; d++) {
+                const testY = entity.y - d * bsC;
+                const by = Math.round(testY / bsC) * bsC;
+                const blk = bkGetAt(cx, by);
+                if (!blk || !blk.body || !blk.body.enable) {
+                    return { x: entity.x, y: testY };
+                }
+            }
+            return null; // 上方向も全部埋まっている場合はnull
+        }
+
         function trySpawnSlime(scene, time) {
             if (time - lastSlimeSpawn < SLIME_SPAWN_INTERVAL) return;
             if (slimes.length >= SLIME_MAX) return;
@@ -7758,12 +8158,26 @@
             const cam = scene.cameras.main;
             const spawnSide = Math.random() < 0.5 ? -1 : 1;
             const spawnX = player.x + spawnSide * (cam.width / 2 + 50 + Math.random() * 100);
-            const spawnY = player.y - 32 + Math.random() * 64;
+            let spawnY = player.y + Math.random() * 32; // 少し下方向のみ（天井に埋まらないよう）
 
             // ワールド境界チェック
             if (spawnX < 50 || spawnX > 5950 || spawnY < groundY || spawnY > 4430) return;
 
-            spawnSlime(scene, spawnX, spawnY);
+            // スポーン位置がブロック内ならば上方向に空きを探す（最大10ブロック）
+            const bx = Math.round(spawnX / BLOCK_SIZE) * BLOCK_SIZE;
+            let safeY = null;
+            for (let d = 0; d <= 10; d++) {
+                const testY = spawnY - d * BLOCK_SIZE;
+                const by = Math.round(testY / BLOCK_SIZE) * BLOCK_SIZE;
+                const blk = bkGetAt(bx, by);
+                if (!blk || !blk.body || !blk.body.enable) {
+                    safeY = testY;
+                    break;
+                }
+            }
+            if (safeY === null) return; // 安全なスポーン位置が見つからなければスキップ
+
+            spawnSlime(scene, spawnX, safeY);
         }
 
         function updateSlimes(scene, time, delta) {
@@ -7772,6 +8186,15 @@
             for (let i = slimes.length - 1; i >= 0; i--) {
                 const sl = slimes[i];
                 if (!sl.active) { slimes.splice(i, 1); continue; }
+
+                // ===== ブロック内埋まりチェック =====
+                const slUnstuck = findUnstuckPos(sl);
+                if (slUnstuck) {
+                    sl.setPosition(slUnstuck.x, slUnstuck.y);
+                    sl.body.reset(slUnstuck.x, slUnstuck.y);
+                    sl.body.setVelocityX(0);
+                    sl.body.setVelocityY(0);
+                }
 
                 // プレイヤーから離れすぎたら消去
                 const distToPlayer = Phaser.Math.Distance.Between(player.x, player.y, sl.x, sl.y);
@@ -8404,20 +8827,30 @@
             }
         }
 
-        // === 朝の草の拡散：上に固体ブロックが何もない土ブロックを草に変換 ===
+        // === 朝の草の拡散：地表付近で上面が開放されている土ブロックだけを草に変換 ===
         function spreadGrass(scene) {
             const allBlocks = platforms.getChildren();
             const toConvert = [];
+            // 地表ブロックは y ≈ WORLD_GROUND_Y + BLOCK_SIZE/2 に存在する。
+            // それより BLOCK_SIZE*6 以上深い土ブロックは洞窟があっても変換しない。
+            const maxConvertY = WORLD_GROUND_Y + BLOCK_SIZE * 6;
             for (let i = 0; i < allBlocks.length; i++) {
                 const blk = allBlocks[i];
                 if (!blk.active) continue;
                 if (blk.getData('typeId') !== BLOCK_TYPES.DIRT) continue;
-                // 真上のセルを blockMap で O(1) 検索
-                const above = bkGetAt(blk.x, blk.y - BLOCK_SIZE);
-                // 上が空（null）か、物理ボディ無効の装飾ブロック（雑草・花・苗木など）なら対象
-                if (!above || !above.body || !above.body.enable) {
-                    toConvert.push(blk);
-                }
+
+                // 地表から深すぎる土ブロックは無条件スキップ
+                if (blk.y > maxConvertY) continue;
+
+                // 真上に何らかのブロックがあれば変換しない
+                // （ハーフブロック・蔦など body.enable=false のものも遮蔽とみなす）
+                const aboveY = blk.y - BLOCK_SIZE;
+                if (bkGetAt(blk.x, aboveY)) continue;
+
+                // 真上に壁ブロックがあれば変換しない
+                if (wallMap.has(wallKey(blk.x, aboveY))) continue;
+
+                toConvert.push(blk);
             }
             if (toConvert.length === 0) return;
             const grassData = BLOCK_DATA[BLOCK_TYPES.GRASS];
